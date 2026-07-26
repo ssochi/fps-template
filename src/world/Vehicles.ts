@@ -83,13 +83,19 @@ function loft(sections: Section[]): THREE.BufferGeometry {
     }
   };
 
+  // Each side walks its own cross-section first, *then* steps to the next one.
+  // Going around the ring first (a[n] -> b[n] -> b[n+1]) is the obvious
+  // ordering and is wrong: it winds every side inward, so back-face culling
+  // removes the surfaces facing the viewer and you see straight through the
+  // hull to the inside of its far wall. The end caps below are unaffected,
+  // which is what makes it easy to miss.
   for (let i = 0; i < sections.length - 1; i++) {
     const a = corners(sections[i]);
     const b = corners(sections[i + 1]);
-    quad(a[0], b[0], b[1], a[1]); // bottom
-    quad(a[1], b[1], b[2], a[2]); // right
-    quad(a[2], b[2], b[3], a[3]); // top
-    quad(a[3], b[3], b[0], a[0]); // left
+    quad(a[0], a[1], b[1], b[0]); // bottom
+    quad(a[1], a[2], b[2], b[1]); // right
+    quad(a[2], a[3], b[3], b[2]); // top
+    quad(a[3], a[0], b[0], b[3]); // left
   }
 
   // End caps, wound outward.
@@ -658,14 +664,20 @@ function buildSupercar(): VehicleBuildResult {
   });
 
   // --- cockpit ------------------------------------------------------------
+  // The body is a closed shell, so anything below its beltline (~0.85) is
+  // sealed in. The interior therefore sits just proud of it, inside the glass
+  // canopy, where it actually reads through the screen.
   bothSides((s) => {
-    mesh(root, new THREE.BoxGeometry(0.42, 0.1, 0.5), m.interior, [s * 0.34, 0.83, 0.05]);
-    const back = mesh(root, new THREE.BoxGeometry(0.4, 0.5, 0.1), m.interior, [s * 0.34, 1.02, -0.22]);
+    mesh(root, new THREE.BoxGeometry(0.42, 0.1, 0.5), m.interior, [s * 0.34, 0.91, 0.05]);
+    const back = mesh(root, new THREE.BoxGeometry(0.4, 0.42, 0.09), m.interior, [s * 0.34, 1.05, -0.22]);
     back.rotation.x = -0.18;
+    mesh(root, new THREE.BoxGeometry(0.34, 0.12, 0.1), m.interior, [s * 0.34, 1.19, -0.3]);
   });
-  mesh(root, new THREE.BoxGeometry(1.1, 0.12, 0.3), m.interior, [0, 0.92, 0.62]);
-  const wheelRim = mesh(root, new THREE.TorusGeometry(0.13, 0.022, 6, 14), m.interior, [0.34, 0.98, 0.5]);
+  mesh(root, new THREE.BoxGeometry(1.1, 0.12, 0.3), m.interior, [0, 0.95, 0.62]);
+  const wheelRim = mesh(root, new THREE.TorusGeometry(0.13, 0.022, 6, 14), m.interior, [0.34, 1.0, 0.5]);
   wheelRim.rotation.x = 1.2;
+  // Centre console bridging the two seats.
+  mesh(root, new THREE.BoxGeometry(0.24, 0.1, 0.8), m.carbon, [0, 0.9, 0.1]);
 
   return {
     root,
@@ -709,17 +721,28 @@ function buildJeep(): VehicleBuildResult {
   mesh(root, new THREE.BoxGeometry(0.34, 0.3, 0.5), m.jeepDark, [0, 0.6, 0.3]);
 
   // --- body tub -----------------------------------------------------------
+  // The tub is a *solid* body whose top surface is the cockpit floor, with the
+  // sides added back as separate panels above it. A single loft up to the
+  // beltline would be a closed box with the seats sealed inside — the hull has
+  // to actually be open, not merely appear open because its roof was culled.
+  const CABIN_FLOOR = 1.0;
   const tub = loft([
-    { z: -2.1, halfWidth: 0.86, bottom: FLOOR, top: 1.36 },
-    { z: -1.5, halfWidth: 0.9, bottom: FLOOR, top: 1.38 },
-    { z: 0.55, halfWidth: 0.9, bottom: FLOOR, top: 1.38 },
+    { z: -2.1, halfWidth: 0.86, bottom: FLOOR, top: CABIN_FLOOR },
+    { z: -1.5, halfWidth: 0.9, bottom: FLOOR, top: CABIN_FLOOR },
+    { z: 0.55, halfWidth: 0.9, bottom: FLOOR, top: CABIN_FLOOR },
     { z: 0.62, halfWidth: 0.88, bottom: FLOOR, top: 1.18 },
     { z: 1.72, halfWidth: 0.86, bottom: FLOOR + 0.04, top: 1.16 },
     { z: 1.95, halfWidth: 0.8, bottom: FLOOR + 0.08, top: 1.1 },
   ]);
   mesh(root, tub, m.jeepBody);
-  // Open cockpit: a floor pan sunk into the tub.
-  mesh(root, new THREE.BoxGeometry(1.66, 0.06, 1.9), m.jeepDark, [0, 0.98, -0.45]);
+  // Cockpit sides, rear panel and dash bulkhead, all solid.
+  bothSides((s) => {
+    mesh(root, new THREE.BoxGeometry(0.1, 0.38, 2.65), m.jeepBody, [s * 0.85, 1.19, -0.775]);
+  });
+  mesh(root, new THREE.BoxGeometry(1.8, 0.38, 0.1), m.jeepBody, [0, 1.19, -2.06]);
+  mesh(root, new THREE.BoxGeometry(1.78, 0.38, 0.1), m.jeepBody, [0, 1.19, 0.58]);
+  // Rubber-matted floor pan laid over the tub deck.
+  mesh(root, new THREE.BoxGeometry(1.62, 0.04, 2.5), m.jeepDark, [0, CABIN_FLOOR + 0.02, -0.775]);
 
   // Bonnet with a centre hinge line and two latches.
   mesh(root, new THREE.BoxGeometry(1.7, 0.05, 1.06), m.jeepBody, [0, 1.19, 1.14]);
