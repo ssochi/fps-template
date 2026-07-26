@@ -11,6 +11,7 @@ import {
 import { StaticBatcher, mergeStaticHierarchy } from './GeometryMerge';
 import type { RangeTarget } from './Targets';
 import type { WeaponId } from '../weapons/WeaponTypes';
+import type { VehicleId } from './Vehicles';
 import { WEAPON_CONFIGS, WEAPON_ORDER } from '../weapons/WeaponConfigs';
 import { randRange } from '../core/MathUtils';
 
@@ -65,6 +66,27 @@ export interface AmmoCrate {
   radius: number;
 }
 
+/** Where a level wants a drivable vehicle parked. */
+export interface VehicleSpawn {
+  id: VehicleId;
+  position: THREE.Vector3;
+  yaw: number;
+}
+
+/**
+ * Everything a lap timer needs. A lap counts only once every checkpoint has
+ * been passed, so cutting the circuit or reversing over the line does nothing.
+ */
+export interface LapCourse {
+  /** A point on the start/finish line. */
+  linePoint: THREE.Vector3;
+  /** Racing direction across the line; crossings are measured along it. */
+  lineNormal: THREE.Vector3;
+  /** Half-length of the line, across the track. */
+  lineHalfWidth: number;
+  checkpoints: { position: THREE.Vector3; radius: number }[];
+}
+
 export interface LevelBuildResult {
   id: LevelId;
   name: string;
@@ -74,6 +96,10 @@ export interface LevelBuildResult {
   collidables: THREE.Object3D[];
   pickups: WeaponPickup[];
   ammoCrates: AmmoCrate[];
+  /** Drivable vehicles the level wants placed. Empty on maps without any. */
+  vehicles: VehicleSpawn[];
+  /** Lap timing geometry, or null on maps with no circuit. */
+  lapCourse: LapCourse | null;
   spawnPoint: THREE.Vector3;
   spawnYaw: number;
   sun: THREE.DirectionalLight;
@@ -97,7 +123,7 @@ export interface LevelDescriptor {
 
 export const LEVELS: readonly LevelDescriptor[] = [
   { id: 'range', name: 'Shooting Range', blurb: 'Covered firing line, 10 lanes of targets out to 150 m.' },
-  { id: 'circuit', name: 'Circuit & Garage', blurb: 'Race track, pit lane and a garage with three vehicles.' },
+  { id: 'circuit', name: 'Circuit & Garage', blurb: 'Race track and pit lane, with three drivable vehicles in the garage.' },
 ];
 
 export interface DustFieldOptions {
@@ -152,6 +178,7 @@ export abstract class LevelBuilder {
   protected readonly targets: RangeTarget[] = [];
   protected readonly pickups: WeaponPickup[] = [];
   protected readonly ammoCrates: AmmoCrate[] = [];
+  protected readonly vehicleSpawns: VehicleSpawn[] = [];
   protected readonly optionalLights: THREE.Light[] = [];
   protected readonly atmospherics: THREE.Object3D[] = [];
   protected readonly world: CollisionWorld;

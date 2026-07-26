@@ -61,6 +61,8 @@ export class ShootingRange extends LevelBuilder {
       collidables: this.collidables,
       pickups: this.pickups,
       ammoCrates: this.ammoCrates,
+      vehicles: [],
+      lapCourse: null,
       spawnPoint: new THREE.Vector3(0, PAD_TOP + 0.02, 4),
       spawnYaw: 0,
       sun,

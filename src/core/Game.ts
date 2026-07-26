@@ -19,6 +19,9 @@ import type { WeaponConfig, WeaponId } from '../weapons/WeaponTypes';
 import { buildWeaponModel } from '../weapons/WeaponMeshes';
 import { ThrowableSystem } from '../weapons/ThrowableSystem';
 import type { ThrowableConfig } from '../weapons/ThrowableConfigs';
+import { VehicleSystem, type VehicleInstance } from '../vehicles/VehicleSystem';
+import { LapTimer } from '../vehicles/LapTimer';
+import type { VehicleConfig } from '../vehicles/VehicleConfigs';
 import { EffectsSystem } from '../fx/EffectsSystem';
 import { AudioEngine, type ImpactMaterial } from '../audio/AudioEngine';
 import { HUD } from '../ui/HUD';
@@ -64,6 +67,8 @@ export class Game {
   private readonly character: CharacterModel;
   private readonly weapons: WeaponSystem;
   private readonly throwables: ThrowableSystem;
+  private readonly vehicles: VehicleSystem;
+  private lapTimer: LapTimer | null = null;
   private readonly effects = new EffectsSystem();
   private readonly audio = new AudioEngine();
   private readonly pipeline: RenderPipeline;
@@ -84,7 +89,10 @@ export class Game {
   private appliedQuality: QualityLevel | null = null;
   private lastWeaponId: WeaponId = 'pistol';
   private collisionDebug: THREE.Object3D | null = null;
-  private interactTarget: 'ammo' | WeaponId | null = null;
+  private interactTarget: 'ammo' | 'vehicle' | WeaponId | null = null;
+  private interactVehicle: VehicleInstance | null = null;
+  /** Sits in the driver's seat rather than on the boom. */
+  private cockpitView = false;
 
   // Scratch objects — the frame loop must not allocate.
   private readonly raycaster = new THREE.Raycaster();
@@ -101,6 +109,21 @@ export class Game {
 
   constructor(container: HTMLElement, hudRoot: HTMLElement, menuRoot: HTMLElement) {
     this.container = container;
+
+    // --- vehicles ---------------------------------------------------------
+    // Built before the level, because `buildLevel` populates it from the
+    // level's spawn list.
+    this.vehicles = new VehicleSystem(this.collision, {
+      getCollidables: () => this.level.collidables,
+      onCannonFire: (position, config) => this.onCannonFire(position, config),
+      onShellImpact: (position, config) => this.onShellImpact(position, config),
+      onCollide: (instance, impact) => {
+        this.audio.playVehicleImpact(instance.position, clamp(impact / 14, 0.2, 1));
+        this.cameraController.addTrauma(clamp(impact / 24, 0.1, 0.7));
+        this.player.damage(clamp(impact - 8, 0, 30), 'fall');
+      },
+    });
+    this.scene.add(this.vehicles.group);
 
     // --- world -----------------------------------------------------------
     // `buildLevel` fills in `level` and `session`; the definite-assignment
@@ -317,6 +340,9 @@ export class Game {
       target.onStateChange = (t, event) => this.onTargetStateChange(t, event);
     }
     this.populatePedestals();
+
+    this.vehicles.spawnAll(this.level.vehicles);
+    this.lapTimer = this.level.lapCourse ? new LapTimer(this.level.lapCourse) : null;
   }
 
   /**
@@ -334,6 +360,8 @@ export class Game {
       this.scene.remove(this.collisionDebug);
       this.collisionDebug = null;
     }
+    if (this.vehicles.driving) this.leaveVehicle(false);
+    this.vehicles.clear();
     this.scene.remove(this.level.root);
     this.level.dispose();
     this.collision.clear();
@@ -475,6 +503,11 @@ export class Game {
 
     this.handleDebugKeys();
 
+    if (this.vehicles.driving) {
+      this.updateDriving(dt);
+      return;
+    }
+
     const lookDelta = this.applyMouseLook();
     const playerInput = this.buildPlayerInput();
     this.player.update(dt, playerInput);
@@ -505,6 +538,7 @@ export class Game {
     this.updateCharacter(dt);
     this.updateInteractions();
 
+    this.vehicles.update(dt, null);
     this.level.update(dt);
     for (const target of this.level.targets) target.update(dt);
     const drill = this.session.update(dt);
@@ -519,6 +553,157 @@ export class Game {
     this.effects.update(dt, this.cameraController.camera);
     this.audio.updateListener(this.cameraController.camera);
     this.updateHud(dt);
+  }
+
+  // ---------------------------------------------------------------- driving
+
+  /**
+   * The driving frame. Player physics is skipped entirely — the vehicle is
+   * authoritative and the player is carried along with it — but look angles,
+   * effects, audio and the HUD all still run.
+   */
+  private updateDriving(dt: number): void {
+    const vehicle = this.vehicles.driving;
+    if (!vehicle) return;
+
+    this.applyMouseLook();
+
+    if (this.input.wasPressed('KeyE')) {
+      this.leaveVehicle(true);
+      return;
+    }
+    if (this.input.wasPressed('KeyV')) {
+      this.cockpitView = !this.cockpitView;
+      this.hud.logEvent(this.cockpitView ? 'Cockpit view' : 'Chase view');
+    }
+
+    const steer = (this.input.isDown('KeyA') ? 1 : 0) - (this.input.isDown('KeyD') ? 1 : 0);
+    const throttle = (this.input.isDown('KeyW') ? 1 : 0) - (this.input.isDown('KeyS') ? 1 : 0);
+
+    this.vehicles.update(dt, {
+      throttle,
+      steer,
+      handbrake: this.input.isDown('Space'),
+      aimYaw: this.cameraController.aimYaw,
+      aimPitch: this.cameraController.aimPitch,
+      firePressed: this.input.wasMousePressed(MOUSE_LEFT),
+    });
+
+    // Carry the player with the vehicle so getting out lands somewhere sane
+    // and so positional audio is heard from the right place.
+    this.player.position.copy(vehicle.position);
+    this.player.velocity.set(0, 0, 0);
+
+    const config = vehicle.config;
+    // A car's camera drifts back behind it; the tank's does not, because the
+    // same look angles are aiming the gun.
+    const wide = config.tracked ? 0 : 10;
+    this.cameraController.updateVehicle(dt, {
+      position: vehicle.position,
+      yaw: vehicle.yaw,
+      pivot: vehicle.cameraPivot,
+      eye: vehicle.driverEye,
+      speed: vehicle.speed,
+      maxSpeed: config.maxSpeed,
+      distance: config.tracked ? 12 : 7.5,
+      height: config.tracked ? 4.2 : 2.4,
+      firstPerson: this.cockpitView,
+      lookYaw: this.player.yaw,
+      lookPitch: this.player.pitch,
+      fovBoost: wide,
+    });
+    this.cameraController.camera.updateMatrixWorld(true);
+
+    this.viewModel.setHidden(true);
+    this.character.root.visible = false;
+
+    this.audio.updateEngine(this.engineRevs(vehicle), Math.max(0, throttle));
+
+    if (this.lapTimer) {
+      const event = this.lapTimer.update(dt, vehicle.position);
+      if (event === 'start') {
+        this.audio.playRangeEvent('start');
+        this.hud.logEvent('Timing started — go!', 'good');
+      } else if (event === 'lap') {
+        const time = LapTimer.format(this.lapTimer.last);
+        const best = this.lapTimer.last === this.lapTimer.best;
+        this.audio.playRangeEvent('end');
+        this.hud.logEvent(`Lap ${this.lapTimer.laps} — ${time}${best ? ' — NEW BEST' : ''}`, 'good');
+      }
+    }
+
+    this.level.update(dt);
+    for (const target of this.level.targets) target.update(dt);
+    this.session.update(dt);
+    this.effects.update(dt, this.cameraController.camera);
+    this.audio.updateListener(this.cameraController.camera);
+    this.updateHud(dt);
+  }
+
+  /** Fakes a gearbox: revs sweep through each ratio as speed climbs. */
+  private engineRevs(vehicle: VehicleInstance): number {
+    const config = vehicle.config;
+    const fraction = clamp(Math.abs(vehicle.speed) / config.maxSpeed, 0, 1);
+    const perGear = 1 / config.gears;
+    const gear = Math.min(config.gears - 1, Math.floor(fraction / perGear));
+    return clamp(0.18 + ((fraction - gear * perGear) / perGear) * 0.82, 0, 1);
+  }
+
+  private gearLabel(vehicle: VehicleInstance): string {
+    if (vehicle.speed < -0.4) return 'R';
+    if (Math.abs(vehicle.speed) < 0.4) return 'N';
+    const config = vehicle.config;
+    const fraction = clamp(Math.abs(vehicle.speed) / config.maxSpeed, 0, 1);
+    return `${Math.min(config.gears, Math.floor(fraction * config.gears) + 1)}`;
+  }
+
+  private enterVehicle(vehicle: VehicleInstance): void {
+    this.vehicles.enter(vehicle);
+    this.cockpitView = false;
+    this.player.yaw = vehicle.yaw;
+    this.player.pitch = 0;
+    this.viewModel.setHidden(true);
+    this.character.root.visible = false;
+    this.audio.startEngine(vehicle.config.engine.timbre);
+    this.audio.playUi('confirm');
+    this.hud.logEvent(
+      `${vehicle.config.name} — W/S drive, A/D steer, Space brake${vehicle.config.cannon ? ', Mouse 1 fire' : ''}`,
+      'good',
+    );
+  }
+
+  private leaveVehicle(announce: boolean): void {
+    const spot = this.vehicles.exit();
+    this.audio.stopEngine();
+    if (spot) this.player.teleport(spot, this.player.yaw);
+    this.viewModel.setHidden(false);
+    this.cockpitView = false;
+    this.character.root.visible = true;
+    if (announce) {
+      this.audio.playUi('click');
+      this.hud.logEvent('Dismounted');
+    }
+  }
+
+  private onCannonFire(position: THREE.Vector3, config: VehicleConfig): void {
+    void config;
+    this.audio.playCannon(position);
+    this.cameraController.addTrauma(0.85);
+    this.cameraController.getAimDirection(this.fireDirection);
+    this.effects.spawnMuzzleFlash(position, this.fireDirection, 2.6, 0xffc98a, 26);
+  }
+
+  private onShellImpact(position: THREE.Vector3, config: VehicleConfig): void {
+    const cannon = config.cannon;
+    if (!cannon) return;
+    this.effects.spawnExplosion(position, cannon.blastRadius, 0);
+    this.audio.playExplosion(position);
+    this.applyBlastDamage(
+      { damage: cannon.damage, damageRadius: cannon.blastRadius } as ThrowableConfig,
+      position,
+    );
+    const distance = this.player.eyePosition.distanceTo(position);
+    this.cameraController.addTrauma(clamp(1 - distance / (cannon.blastRadius * 3), 0, 0.8));
   }
 
   private handleDebugKeys(): void {
@@ -711,24 +896,37 @@ export class Game {
 
   private updateInteractions(): void {
     this.interactTarget = null;
+    this.interactVehicle = null;
     let closest = Infinity;
+
+    // Vehicles win over everything else within reach — walking past a car to
+    // pick up a rifle is the rarer intent.
+    const vehicle = this.vehicles.nearest(this.player.position);
+    if (vehicle) {
+      this.interactVehicle = vehicle;
+      this.interactTarget = 'vehicle';
+    }
 
     for (const pickup of this.level.pickups) {
       const d = this.player.position.distanceTo(pickup.position);
-      if (d < pickup.radius && d < closest) {
+      if (d < pickup.radius && d < closest && !this.interactVehicle) {
         closest = d;
         this.interactTarget = pickup.id;
       }
     }
-    for (const crate of this.level.ammoCrates) {
-      if (this.player.position.distanceTo(crate.position) < crate.radius) {
-        this.interactTarget = 'ammo';
-        break;
+    if (!this.interactVehicle) {
+      for (const crate of this.level.ammoCrates) {
+        if (this.player.position.distanceTo(crate.position) < crate.radius) {
+          this.interactTarget = 'ammo';
+          break;
+        }
       }
     }
 
     if (this.interactTarget && this.input.wasPressed('KeyE')) {
-      if (this.interactTarget === 'ammo') {
+      if (this.interactTarget === 'vehicle') {
+        if (this.interactVehicle) this.enterVehicle(this.interactVehicle);
+      } else if (this.interactTarget === 'ammo') {
         this.weapons.refillAll();
         this.throwables.refill();
         this.audio.playUi('confirm');
@@ -1031,15 +1229,40 @@ export class Game {
     const ammo = this.weapons.getAmmoDisplay();
     const cfg = this.weapons.config;
 
+    const driving = this.vehicles.driving;
+
     let prompt: string | null = null;
     let promptKey: string | null = null;
-    if (this.interactTarget === 'ammo') {
+    if (driving) {
+      prompt = 'Get out';
+      promptKey = 'E';
+    } else if (this.interactTarget === 'vehicle' && this.interactVehicle) {
+      prompt = `Drive ${this.interactVehicle.config.name}`;
+      promptKey = 'E';
+    } else if (this.interactTarget === 'ammo') {
       prompt = 'Resupply ammunition';
       promptKey = 'E';
-    } else if (this.interactTarget) {
+    } else if (this.interactTarget && this.interactTarget !== 'vehicle') {
       prompt = `Take ${WEAPON_CONFIGS[this.interactTarget].name}`;
       promptKey = 'E';
     }
+
+    const lap = this.lapTimer;
+    const vehicleFrame = driving
+      ? {
+          name: driving.config.name,
+          speedKph: Math.abs(driving.speed) * 3.6,
+          gear: this.gearLabel(driving),
+          revs: this.engineRevs(driving),
+          laps: lap?.laps ?? 0,
+          lapTime: LapTimer.format(lap?.current ?? null),
+          lastLap: LapTimer.format(lap?.last ?? null),
+          bestLap: LapTimer.format(lap?.best ?? null),
+          reload: driving.config.cannon
+            ? clamp(1 - driving.reload / driving.config.cannon.reload, 0, 1)
+            : null,
+        }
+      : null;
 
     this.hud.update(dt, {
       health: this.player.health,
@@ -1056,7 +1279,8 @@ export class Game {
       reloading: this.weapons.isReloading,
       fov: this.cameraController.camera.fov,
       viewportHeight: window.innerHeight,
-      showScope: cfg.scopeFov !== undefined,
+      showScope: cfg.scopeFov !== undefined && !driving,
+      vehicle: vehicleFrame,
       score: this.session.score,
       shotsFired: this.session.shotsFired,
       shotsHit: this.session.shotsHit,

@@ -37,6 +37,20 @@ export interface HudFrame {
   promptKey: string | null;
   /** Selected throwable, its stock and cook progress. */
   throwable: { name: string; count: number; cook: number } | null;
+  /** Set while driving; suppresses the weapon panels and shows the dash. */
+  vehicle: {
+    name: string;
+    speedKph: number;
+    gear: string;
+    /** 0..1 through the rev range. */
+    revs: number;
+    laps: number;
+    lapTime: string;
+    lastLap: string;
+    bestLap: string;
+    /** Tank only: 0..1 reload progress, 1 = ready. */
+    reload: number | null;
+  } | null;
 }
 
 interface DamageNumber {
@@ -70,6 +84,17 @@ export class HUD {
   private readonly staminaValue: HTMLElement;
 
   private readonly loadoutEl: HTMLElement;
+  private readonly ammoPanel: HTMLElement;
+  private readonly vehicleEl: HTMLElement;
+  private readonly vehNameEl: HTMLElement;
+  private readonly vehKphEl: HTMLElement;
+  private readonly vehRevEl: HTMLElement;
+  private readonly vehGearEl: HTMLElement;
+  private readonly vehLapEl: HTMLElement;
+  private readonly vehTimeEl: HTMLElement;
+  private readonly vehBestEl: HTMLElement;
+  private readonly vehReloadRow: HTMLElement;
+  private readonly vehReloadEl: HTMLElement;
   private readonly slotEls = new Map<WeaponId, HTMLElement>();
 
   private readonly scoreEl: HTMLElement;
@@ -105,6 +130,9 @@ export class HUD {
   private lastDrill = '';
   private lastPrompt = '';
   private lastThrowable = '';
+  private lastVehicleName = '';
+  private lastKph = -1;
+  private lastGear = '';
   private flashAmount = 0;
 
   showCrosshair = true;
@@ -135,6 +163,7 @@ export class HUD {
     this.staminaValue = this.q('#stamina-value');
 
     this.loadoutEl = this.q('#loadout');
+    this.ammoPanel = this.q('#ammo');
     this.scoreEl = this.q('#stat-score');
     this.accuracyEl = this.q('#stat-accuracy');
     this.hitsEl = this.q('#stat-hits');
@@ -151,6 +180,16 @@ export class HUD {
     this.throwableCount = this.q('#tw-count');
     this.throwableCook = this.q('#tw-cook-fill');
     this.flashOverlay = this.q('#flash-overlay');
+    this.vehicleEl = this.q('#vehicle');
+    this.vehNameEl = this.q('#vehicle .veh-name');
+    this.vehKphEl = this.q('#veh-kph');
+    this.vehRevEl = this.q('#veh-rev-fill');
+    this.vehGearEl = this.q('#veh-gear');
+    this.vehLapEl = this.q('#veh-lap');
+    this.vehTimeEl = this.q('#veh-time');
+    this.vehBestEl = this.q('#veh-best');
+    this.vehReloadRow = this.q('#vehicle .veh-reload');
+    this.vehReloadEl = this.q('#veh-reload');
 
     this.buildLoadout();
     this.buildScopeReticle();
@@ -215,6 +254,17 @@ export class HUD {
         <div class="tw-cook"><div id="tw-cook-fill"></div></div>
       </div>
 
+      <div id="vehicle" class="panel hidden">
+        <div class="veh-name">—</div>
+        <div class="veh-speed"><span id="veh-kph">0</span><span class="veh-unit">KM/H</span></div>
+        <div class="veh-revs"><div id="veh-rev-fill"></div></div>
+        <div class="veh-row"><span class="k">GEAR</span><span class="v" id="veh-gear">N</span></div>
+        <div class="veh-row"><span class="k">LAP</span><span class="v" id="veh-lap">0</span></div>
+        <div class="veh-row"><span class="k">TIME</span><span class="v" id="veh-time">—</span></div>
+        <div class="veh-row"><span class="k">BEST</span><span class="v accent" id="veh-best">—</span></div>
+        <div class="veh-row veh-reload hidden"><span class="k">GUN</span><span class="v" id="veh-reload">READY</span></div>
+      </div>
+
       <div id="drill-banner" class="panel hidden"></div>
       <div id="event-log"></div>
       <div id="prompt" class="hidden"></div>
@@ -257,6 +307,7 @@ export class HUD {
     this.updateStats(frame);
     this.updatePrompt(frame);
     this.updateThrowables(frame);
+    this.updateVehicle(frame);
     this.updateDamageNumbers(dt);
     this.updateVignettes(dt, frame);
 
@@ -422,6 +473,46 @@ export class HUD {
    * Flash blindness: a white overlay that decays. `amount` is 0..1 and the
    * effect stacks so a second bang while already blind keeps you down longer.
    */
+  /**
+   * The dash replaces the weapon panels while driving — showing an ammo count
+   * and a crosshair for a gun the player cannot reach would just be noise.
+   */
+  private updateVehicle(frame: HudFrame): void {
+    const v = frame.vehicle;
+    const driving = v !== null;
+    this.vehicleEl.classList.toggle('hidden', !driving);
+    this.ammoPanel.classList.toggle('hidden', driving);
+    this.loadoutEl.classList.toggle('hidden', driving);
+    this.throwablePanel.classList.toggle('hidden', driving);
+    if (!v) return;
+
+    if (this.lastVehicleName !== v.name) {
+      this.lastVehicleName = v.name;
+      this.vehNameEl.textContent = v.name;
+    }
+    const kph = Math.round(v.speedKph);
+    if (this.lastKph !== kph) {
+      this.lastKph = kph;
+      this.vehKphEl.textContent = `${kph}`;
+    }
+    this.vehRevEl.style.width = `${Math.round(clamp(v.revs, 0, 1) * 100)}%`;
+    this.vehRevEl.classList.toggle('redline', v.revs > 0.92);
+    if (this.lastGear !== v.gear) {
+      this.lastGear = v.gear;
+      this.vehGearEl.textContent = v.gear;
+    }
+    this.vehLapEl.textContent = `${v.laps}`;
+    this.vehTimeEl.textContent = v.lapTime;
+    this.vehBestEl.textContent = v.bestLap;
+
+    this.vehReloadRow.classList.toggle('hidden', v.reload === null);
+    if (v.reload !== null) {
+      const ready = v.reload >= 1;
+      this.vehReloadEl.textContent = ready ? 'READY' : `${Math.round(v.reload * 100)}%`;
+      this.vehReloadEl.classList.toggle('accent', ready);
+    }
+  }
+
   applyFlash(amount: number): void {
     this.flashAmount = clamp(Math.max(this.flashAmount, amount), 0, 1);
   }

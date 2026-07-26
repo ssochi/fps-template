@@ -944,3 +944,79 @@ button.btn.secondary {
     bottom: 16px;
   }
 }
+
+
+/* ------------------------------------------------------------- vehicle dash */
+
+#vehicle {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  min-width: 230px;
+  padding: 12px 16px 10px;
+}
+
+#vehicle .veh-name {
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: var(--hud-dim);
+  margin-bottom: 2px;
+}
+
+#vehicle .veh-speed {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+#vehicle .veh-speed span:first-child {
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+#vehicle .veh-unit {
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: var(--hud-dim);
+}
+
+#vehicle .veh-revs {
+  height: 4px;
+  margin: 8px 0 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+#veh-rev-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--hud-accent);
+  transition: width 0.06s linear;
+}
+
+#veh-rev-fill.redline {
+  background: #ff4438;
+}
+
+#vehicle .veh-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  letter-spacing: 2px;
+  line-height: 1.7;
+}
+
+#vehicle .veh-row .k {
+  color: var(--hud-dim);
+}
+
+#vehicle .veh-row .v {
+  font-variant-numeric: tabular-nums;
+}
+
+#vehicle .veh-row .v.accent {
+  color: var(--hud-accent);
+}

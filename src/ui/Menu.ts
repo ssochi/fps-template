@@ -52,6 +52,19 @@ const CONTROLS: ControlEntry[] = [
   { keys: ['Esc'], action: 'Pause / settings' },
 ];
 
+/** Shown alongside the on-foot controls; only relevant on the circuit map. */
+const VEHICLE_CONTROLS: ControlEntry[] = [
+  { keys: ['E'], action: 'Get in / out of a vehicle' },
+  { keys: ['W'], action: 'Throttle' },
+  { keys: ['S'], action: 'Brake, then reverse' },
+  { keys: ['A'], action: 'Steer left' },
+  { keys: ['D'], action: 'Steer right' },
+  { keys: ['Space'], action: 'Handbrake' },
+  { keys: ['Mouse'], action: 'Look around — aims the tank turret' },
+  { keys: ['Mouse 1'], action: 'Fire the 120 mm gun (tank)' },
+  { keys: ['V'], action: 'Chase / cockpit camera' },
+];
+
 export class Menu {
   private readonly root: HTMLElement;
   private readonly settings: Settings;
@@ -112,11 +125,15 @@ export class Menu {
           <h1>Three.js FPS Template</h1>
           <p class="subtitle">
             First / third person shooter sandbox — ten weapons, three throwables, and two maps:
-            a full shooting range, and a race circuit whose garage holds a hypercar, a 4x4 and a tank.
+            a full shooting range, and a race circuit whose garage holds a hypercar, a 4x4 and a tank —
+            all three drivable, with lap timing, and a working 120 mm gun on the tank.
           </p>
 
           <h2>Controls</h2>
           <div class="controls-grid">${this.controlsMarkup()}</div>
+
+          <h2>Driving</h2>
+          <div class="controls-grid">${this.vehicleControlsMarkup()}</div>
 
           <h2>Arsenal</h2>
           <div class="weapon-cards">${this.weaponCardsMarkup()}</div>
@@ -213,6 +230,9 @@ export class Menu {
           <h2>Controls</h2>
           <div class="controls-grid">${this.controlsMarkup()}</div>
 
+          <h2>Driving</h2>
+          <div class="controls-grid">${this.vehicleControlsMarkup()}</div>
+
           <div class="button-row">
             <button class="btn" id="btn-resume">Resume</button>
             <button class="btn secondary" id="btn-reset-range">Reset range</button>
@@ -233,6 +253,21 @@ export class Menu {
     `;
   }
 
+  private vehicleControlsMarkup(): string {
+    return Menu.controlRows(VEHICLE_CONTROLS);
+  }
+
+  private static controlRows(entries: ControlEntry[]): string {
+    return entries
+      .map((c) => {
+        const keys = c.keys
+          .map((k) => (k === '—' || k === '+' ? `<span>${k}</span>` : `<kbd>${k}</kbd>`))
+          .join(' ');
+        return `<div class="ctrl"><span>${keys}</span><span>${c.action}</span></div>`;
+      })
+      .join('');
+  }
+
   private mapCardsMarkup(): string {
     return LEVELS.map(
       (l) => `
@@ -244,12 +279,7 @@ export class Menu {
   }
 
   private controlsMarkup(): string {
-    return CONTROLS.map((c) => {
-      const keys = c.keys
-        .map((k) => (k === '—' || k === '+' ? `<span>${k}</span>` : `<kbd>${k}</kbd>`))
-        .join(' ');
-      return `<div class="ctrl"><span>${keys}</span><span>${c.action}</span></div>`;
-    }).join('');
+    return Menu.controlRows(CONTROLS);
   }
 
   private throwableCardsMarkup(): string {

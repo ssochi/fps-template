@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import type { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { CollisionWorld } from '../physics/CollisionWorld';
-import { LevelBuilder, type LevelBuildResult } from './LevelBuilder';
+import { LevelBuilder, type LapCourse, type LevelBuildResult } from './LevelBuilder';
 import { RangeTarget, type TargetKind } from './Targets';
-import { buildVehicle, VEHICLES } from './Vehicles';
+import { VEHICLES } from './Vehicles';
 import type { VehicleId } from './Vehicles';
 import { randRange } from '../core/MathUtils';
 
@@ -67,6 +67,13 @@ const GARAGE_X0 = -60;
 const GARAGE_X1 = 20;
 const GARAGE_H = 7;
 const FLOOR_Y = 0.16;
+
+/**
+ * Gaps in the pit wall, as x ranges. Without these the pit lane is a sealed
+ * corridor and a car can never reach the circuit.
+ */
+const PIT_ENTRY = [GARAGE_X0 - 10, GARAGE_X0 - 2] as const;
+const PIT_EXIT = [GARAGE_X1 + 8, GARAGE_X1 + 16] as const;
 
 /** Firing point and target line of the service-road gunnery range. */
 const RANGE_X = 78;
@@ -134,6 +141,8 @@ export class RaceTrack extends LevelBuilder {
       collidables: this.collidables,
       pickups: this.pickups,
       ammoCrates: this.ammoCrates,
+      vehicles: this.vehicleSpawns,
+      lapCourse: this.buildLapCourse(),
       // On the pit lane, facing the open garage doors and the three cars.
       spawnPoint: new THREE.Vector3(-20, 0.06, PIT_LANE_Z + 1),
       spawnYaw: 0,
@@ -145,6 +154,24 @@ export class RaceTrack extends LevelBuilder {
       fog: new THREE.Fog(0xb6cee4, 210, 1100),
       update: (dt: number) => this.update(dt),
       dispose: () => this.disposeOwned(),
+    };
+  }
+
+  /**
+   * Start/finish is on the main straight at x = 0, crossed in the +X racing
+   * direction. Three checkpoints spread around the lap stop the line being
+   * gamed by driving back and forth over it.
+   */
+  private buildLapCourse(): LapCourse {
+    const checkpoints = [0.25, 0.5, 0.75].map((f) => {
+      const s = this.samples[Math.round(f * this.samples.length) % this.samples.length];
+      return { position: s.position.clone(), radius: 24 };
+    });
+    return {
+      linePoint: new THREE.Vector3(0, 0, -70),
+      lineNormal: new THREE.Vector3(1, 0, 0),
+      lineHalfWidth: TRACK_HALF + 1.5,
+      checkpoints,
     };
   }
 
@@ -666,19 +693,69 @@ export class RaceTrack extends LevelBuilder {
 
     // Pit wall with a chequered cap. This is the barrier along the pit
     // straight — `PIT_MASK_Z` cuts the generated armco so they never overlap.
-    this.box(width, 1.1, 0.4, cx, 0.55, PIT_WALL_Z, m.concrete, { surface: 'concrete' });
-    for (let i = 0; i < Math.round(width / 1.2); i++) {
-      this.box(1.2, 0.12, 0.5, x0 + 0.6 + i * 1.2, 1.16, PIT_WALL_Z, i % 2 === 0 ? m.concreteDark : m.whitePaint, {
+    // It is built in segments so the entry and exit stay open to the track.
+    const wallSpans: [number, number][] = [
+      [x0, PIT_ENTRY[0]],
+      [PIT_ENTRY[1], PIT_EXIT[0]],
+      [PIT_EXIT[1], x1],
+    ];
+    for (const [a, b] of wallSpans) {
+      if (b - a < 0.5) continue;
+      this.box(b - a, 1.1, 0.4, (a + b) / 2, 0.55, PIT_WALL_Z, m.concrete, { surface: 'concrete' });
+      for (let i = 0; i < Math.round((b - a) / 1.2); i++) {
+        this.box(
+          1.2,
+          0.12,
+          0.5,
+          a + 0.6 + i * 1.2,
+          1.16,
+          PIT_WALL_Z,
+          i % 2 === 0 ? m.concreteDark : m.whitePaint,
+          { surface: 'concrete', solid: false, shootable: false },
+        );
+      }
+    }
+
+    // Slip roads joining the pit lane to the circuit through those gaps.
+    for (const [span, label] of [
+      [PIT_ENTRY, 'PIT ENTRY'],
+      [PIT_EXIT, 'PIT EXIT'],
+    ] as [readonly [number, number], string][]) {
+      const mid = (span[0] + span[1]) / 2;
+      const gap = span[1] - span[0];
+      const trackEdge = -70 - TRACK_HALF;
+      const depth = Math.abs(trackEdge - PIT_WALL_Z) + 3;
+      const centreZ = (PIT_WALL_Z + trackEdge) / 2;
+      this.box(gap, 0.06, depth, mid, 0.03, centreZ, m.asphalt, {
         surface: 'concrete',
         solid: false,
-        shootable: false,
+        castShadow: false,
+      });
+      for (const side of [-1, 1]) {
+        this.prop(
+          new THREE.PlaneGeometry(0.18, depth),
+          m.whitePaint,
+          [mid + (side * gap) / 2, 0.07, centreZ],
+          [-Math.PI / 2, 0, 0],
+          { surface: 'concrete', castShadow: false, shootable: false },
+        );
+      }
+      // Beside the opening, not across it — a tank is 3 m tall.
+      this.sign(label, undefined, span[1] + 3, 2.2, PIT_WALL_Z - 0.35, 5.0, 1.0, Math.PI, {
+        background: '#12161b',
+        borderColor: '#7fd4ff',
       });
     }
     // Timing stands behind the wall, one per garage.
     for (const bay of BAYS) {
       this.box(4.4, 0.12, 2.2, bay.x, 2.3, PIT_WALL_Z - 1.6, m.metalDark, { surface: 'metal', solid: false });
       for (const dx of [-2, 2]) {
-        this.box(0.16, 2.3, 0.16, bay.x + dx, 1.15, PIT_WALL_Z - 1.6, m.metalDark, { surface: 'metal' });
+        this.box(0.16, 2.3, 0.16, bay.x + dx, 1.15, PIT_WALL_Z - 1.6, m.metalDark, {
+          surface: 'metal',
+          // Thin posts directly ahead of a garage door; leave them shootable
+          // scenery rather than something a car snags on.
+          solid: false,
+        });
       }
       this.box(4.4, 1.0, 0.12, bay.x, 2.9, PIT_WALL_Z - 2.6, m.metalDark, { surface: 'metal', solid: false });
       this.sign('TIMING', undefined, bay.x, 2.9, PIT_WALL_Z - 2.67, 4.2, 0.9, Math.PI);
@@ -702,9 +779,11 @@ export class RaceTrack extends LevelBuilder {
         tiltX: -Math.PI / 2,
       });
 
-      // Tyre sets stacked ready, a fuel rig and a wheel-gun trolley.
+      // Tyre sets stacked ready, a fuel rig and a wheel-gun trolley — pushed
+      // out to the edges of the box so the lane straight ahead of the garage
+      // door stays clear enough to drive a tank through.
       for (let stack = 0; stack < 3; stack++) {
-        const sx = bay.x - 5.4 + stack * 1.1;
+        const sx = bay.x - 8.6 + stack * 1.1;
         for (let layer = 0; layer < 4; layer++) {
           this.prop(
             new THREE.TorusGeometry(0.36, 0.15, 6, 14),
@@ -715,20 +794,20 @@ export class RaceTrack extends LevelBuilder {
           );
         }
       }
-      this.box(0.9, 1.7, 0.9, bay.x + 4.6, 0.85, PIT_LANE_Z - 2.4, m.metalDark, { surface: 'metal' });
+      this.box(0.9, 1.7, 0.9, bay.x + 8.4, 0.85, PIT_LANE_Z - 2.4, m.metalDark, { surface: 'metal' });
       this.prop(
         new THREE.CylinderGeometry(0.06, 0.06, 1.4, 8),
         m.plastic,
-        [bay.x + 4.6, 2.2, PIT_LANE_Z - 2.4],
+        [bay.x + 8.4, 2.2, PIT_LANE_Z - 2.4],
         [0.3, 0, 0],
         { surface: 'metal', shootable: false },
       );
-      this.box(1.3, 0.7, 0.6, bay.x + 3.0, 0.35, PIT_LANE_Z - 2.6, m.paintedRed, { surface: 'metal' });
+      this.box(1.3, 0.7, 0.6, bay.x + 6.6, 0.35, PIT_LANE_Z - 2.6, m.paintedRed, { surface: 'metal' });
       for (const gx of [-0.35, 0.35]) {
         this.prop(
           new THREE.CylinderGeometry(0.09, 0.09, 0.5, 10),
           m.gunMetal,
-          [bay.x + 3.0 + gx, 0.9, PIT_LANE_Z - 2.6],
+          [bay.x + 6.6 + gx, 0.9, PIT_LANE_Z - 2.6],
           [0.2, 0, 0],
           { surface: 'metal', shootable: false },
         );
@@ -970,33 +1049,21 @@ export class RaceTrack extends LevelBuilder {
     this.poster('rules', GARAGE_X1 - 3.4, 2.6, GARAGE_BACK_Z + 0.32, 1.4, 0);
   }
 
+  /**
+   * Vehicles are drivable, so the level only says *where* they go. Building and
+   * owning them belongs to `VehicleSystem` — baking them into the static batch
+   * here would be exactly wrong.
+   */
   private buildVehicles(): void {
+    const z = (GARAGE_FRONT_Z + GARAGE_BACK_Z) / 2 + 1;
     for (let i = 0; i < BAYS.length; i++) {
-      const bay = BAYS[i];
-      const built = buildVehicle(bay.id);
       // Parked nose-out toward the pit lane, angled a few degrees so the row
       // does not read as a parade line.
-      const yaw = (i - 1) * 0.06;
-      const z = (GARAGE_FRONT_Z + GARAGE_BACK_Z) / 2 + 1;
-      built.root.position.set(bay.x, FLOOR_Y, z);
-      built.root.rotation.y = yaw;
-
-      // Bake the whole vehicle into the level batch: it never animates, so it
-      // costs one draw call per material instead of one per bolt.
-      this.propObject(built.root, { surface: 'metal', shootable: true });
-
-      const rot = new THREE.Matrix4().makeRotationY(yaw);
-      const cos = Math.abs(Math.cos(yaw));
-      const sin = Math.abs(Math.sin(yaw));
-      for (const collider of built.colliders) {
-        const centre = collider.centre.clone().applyMatrix4(rot).add(built.root.position);
-        const size = collider.size;
-        this.world.addBox(
-          centre,
-          new THREE.Vector3(size.x * cos + size.z * sin, size.y, size.z * cos + size.x * sin),
-          'metal',
-        );
-      }
+      this.vehicleSpawns.push({
+        id: BAYS[i].id,
+        position: new THREE.Vector3(BAYS[i].x, FLOOR_Y, z),
+        yaw: (i - 1) * 0.06,
+      });
     }
   }
 

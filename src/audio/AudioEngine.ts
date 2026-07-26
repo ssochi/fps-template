@@ -51,6 +51,18 @@ export class AudioEngine {
   private readonly reverbReturn: GainNode;
   private readonly deafenFilter: BiquadFilterNode;
 
+  /** Running engine voice, alive only while the player is driving. */
+  private engine: {
+    oscA: OscillatorNode;
+    oscB: OscillatorNode;
+    sub: OscillatorNode;
+    noise: AudioBufferSourceNode;
+    noiseGain: GainNode;
+    filter: BiquadFilterNode;
+    gain: GainNode;
+    baseFreq: number;
+  } | null = null;
+
   private noiseBuffer!: AudioBuffer;
   private pinkBuffer!: AudioBuffer;
   private distortionCurve: Float32Array<ArrayBuffer>;
@@ -733,6 +745,124 @@ export class AudioEngine {
         tail: 0.4,
       }, spatial);
     }
+  }
+
+  // ------------------------------------------------------------- vehicles
+
+  /**
+   * Starts a looping engine voice.
+   *
+   * Two detuned saws plus a sub give the body, a resonant lowpass sweeping with
+   * revs gives the character, and a noise bed stands in for induction and
+   * transmission whine. `timbre` mostly sets how far apart the saws sit and how
+   * much noise rides along — a V12 is tight and bright, a diesel is loose and
+   * gruff.
+   */
+  startEngine(timbre: 'v12' | 'petrol' | 'diesel'): void {
+    this.stopEngine();
+    const t = this.ctx.currentTime;
+    const spec = {
+      v12: { base: 34, detune: 7, noise: 0.05, q: 6, sub: 0.22 },
+      petrol: { base: 26, detune: 14, noise: 0.11, q: 3.4, sub: 0.3 },
+      diesel: { base: 17, detune: 22, noise: 0.2, q: 2.2, sub: 0.5 },
+    }[timbre];
+
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 400;
+    filter.Q.value = spec.q;
+    filter.connect(gain);
+    gain.connect(this.sfxBus);
+
+    const oscA = this.ctx.createOscillator();
+    oscA.type = 'sawtooth';
+    oscA.frequency.value = spec.base;
+    const oscB = this.ctx.createOscillator();
+    oscB.type = 'sawtooth';
+    oscB.frequency.value = spec.base;
+    oscB.detune.value = spec.detune;
+    const sub = this.ctx.createOscillator();
+    sub.type = 'square';
+    sub.frequency.value = spec.base * 0.5;
+    const subGain = this.ctx.createGain();
+    subGain.gain.value = spec.sub;
+    sub.connect(subGain);
+    subGain.connect(filter);
+    oscA.connect(filter);
+    oscB.connect(filter);
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = this.noiseBuffer;
+    noise.loop = true;
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.value = spec.noise;
+    noise.connect(noiseGain);
+    noiseGain.connect(filter);
+
+    oscA.start(t);
+    oscB.start(t);
+    sub.start(t);
+    noise.start(t);
+    gain.gain.setTargetAtTime(0.28, t, 0.12);
+
+    this.engine = { oscA, oscB, sub, noise, noiseGain, filter, gain, baseFreq: spec.base };
+  }
+
+  /**
+   * @param rpm01 0..1 through the rev range.
+   * @param load 0..1 throttle, which opens the filter and lifts the level.
+   */
+  updateEngine(rpm01: number, load: number): void {
+    if (!this.engine) return;
+    const e = this.engine;
+    const t = this.ctx.currentTime;
+    const rev = clamp(rpm01, 0, 1);
+    const freq = e.baseFreq * (1 + rev * 3.6);
+    e.oscA.frequency.setTargetAtTime(freq, t, 0.05);
+    e.oscB.frequency.setTargetAtTime(freq, t, 0.05);
+    e.sub.frequency.setTargetAtTime(freq * 0.5, t, 0.05);
+    e.filter.frequency.setTargetAtTime(300 + rev * 2600 + load * 700, t, 0.06);
+    e.gain.gain.setTargetAtTime(0.2 + rev * 0.16 + load * 0.08, t, 0.08);
+    e.noiseGain.gain.setTargetAtTime(0.04 + rev * 0.1, t, 0.1);
+  }
+
+  stopEngine(): void {
+    if (!this.engine) return;
+    const e = this.engine;
+    const t = this.ctx.currentTime;
+    e.gain.gain.setTargetAtTime(0, t, 0.08);
+    for (const node of [e.oscA, e.oscB, e.sub, e.noise]) node.stop(t + 0.4);
+    this.engine = null;
+  }
+
+  /** Tyres and panels scraping the armco. */
+  playVehicleImpact(position: THREE.Vector3, strength: number): void {
+    const spatial: SpatialOptions = { position, refDistance: 10, maxDistance: 300 };
+    const peak = clamp(strength, 0.15, 1);
+    this.burst(
+      { duration: 0.22, peak: peak * 0.8, type: 'bandpass', freq: 900, q: 0.9, tail: 0.7, distort: true },
+      spatial,
+    );
+    this.tone({ freq: 150, freqEnd: 48, duration: 0.35, peak: peak * 0.6, type: 'triangle', tail: 0.6 }, spatial);
+  }
+
+  /** 120 mm main gun: a hard crack, a deep thump and a long tail. */
+  playCannon(position: THREE.Vector3): void {
+    const spatial: SpatialOptions = { position, refDistance: 20, maxDistance: 900 };
+    this.burst(
+      { duration: 0.32, peak: 1, type: 'lowpass', freq: 12000, freqEnd: 200, tail: 1, distort: true },
+      spatial,
+    );
+    this.tone({ freq: 88, freqEnd: 24, duration: 0.9, peak: 1, type: 'square', tail: 1 }, spatial);
+    this.tone({ freq: 46, freqEnd: 18, duration: 1.4, peak: 0.8, type: 'sine', tail: 1 }, spatial);
+    this.burst(
+      { duration: 2.2, peak: 0.26, type: 'lowpass', freq: 1800, freqEnd: 120, attack: 0.1, tail: 1, pink: true },
+      spatial,
+    );
+    // Breech and recoil clatter.
+    this.burst({ duration: 0.1, peak: 0.3, type: 'bandpass', freq: 2600, q: 2, delay: 0.28 }, spatial);
   }
 
   playSmokePop(position: THREE.Vector3): void {

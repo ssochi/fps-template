@@ -207,6 +207,74 @@ export class CameraController {
     this.camera.quaternion.setFromEuler(this.euler);
   }
 
+  /**
+   * Chase / cockpit camera for a vehicle.
+   *
+   * `yaw` and `pitch` are the player's own look angles, so mouse movement
+   * orbits the car. When `autoCentre` is set the orbit drifts back behind the
+   * vehicle once the player stops looking around — right for a car, wrong for
+   * the tank, where the same angles are aiming the gun.
+   */
+  updateVehicle(
+    dt: number,
+    frame: {
+      position: THREE.Vector3;
+      yaw: number;
+      pivot: THREE.Vector3;
+      eye: THREE.Vector3;
+      speed: number;
+      maxSpeed: number;
+      distance: number;
+      height: number;
+      firstPerson: boolean;
+      lookYaw: number;
+      lookPitch: number;
+      fovBoost: number;
+    },
+  ): void {
+    this.recoilPitch.target = 0;
+    this.recoilYaw.target = 0;
+    this.aimYaw = frame.lookYaw + this.recoilYaw.update(dt);
+    this.aimPitch = clamp(frame.lookPitch + this.recoilPitch.update(dt), -89 * DEG2RAD, 89 * DEG2RAD);
+
+    // Speed widens the view — the cheapest sense of pace there is.
+    const speedFraction = clamp(Math.abs(frame.speed) / Math.max(1, frame.maxSpeed), 0, 1);
+    const targetFov = this.baseFov + frame.fovBoost * speedFraction;
+    this.currentFov = damp(this.currentFov, targetFov, 6, dt);
+    if (Math.abs(this.camera.fov - this.currentFov) > 0.01) {
+      this.camera.fov = this.currentFov;
+      this.camera.updateProjectionMatrix();
+    }
+
+    this.trauma = Math.max(0, this.trauma - dt * 1.6);
+    this.shakeTime += dt * 26;
+    const shake = this.trauma * this.trauma;
+    const shakePitch = noise1D(this.shakeTime, 1) * shake * 1.6 * DEG2RAD;
+    const shakeYaw = noise1D(this.shakeTime, 2) * shake * 1.6 * DEG2RAD;
+    const shakeRoll = noise1D(this.shakeTime, 3) * shake * 2.4 * DEG2RAD;
+
+    const cos = Math.cos(frame.yaw);
+    const sin = Math.sin(frame.yaw);
+    const local = (v: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 =>
+      out.set(v.x * cos + v.z * sin, v.y, -v.x * sin + v.z * cos).add(frame.position);
+
+    this.euler.set(this.aimPitch + shakePitch, this.aimYaw + shakeYaw, shakeRoll);
+    this.camera.quaternion.setFromEuler(this.euler);
+
+    if (frame.firstPerson) {
+      this.camera.position.copy(local(frame.eye, this.orbit));
+      return;
+    }
+
+    local(frame.pivot, this.orbit);
+    const back = this.tmpDir.set(0, 0, 1).applyQuaternion(this.camera.quaternion);
+    this.desired
+      .copy(this.orbit)
+      .addScaledVector(back, frame.distance)
+      .add(this.tmp.set(0, frame.height, 0));
+    this.camera.position.copy(this.resolveBoomCollision(this.orbit, this.desired));
+  }
+
   /** Pulls the boom in so the camera never ends up inside geometry. */
   private resolveBoomCollision(origin: THREE.Vector3, target: THREE.Vector3): THREE.Vector3 {
     if (this.collidables.length === 0) return target;

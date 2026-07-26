@@ -42,6 +42,12 @@ export class CollisionWorld {
     return collider;
   }
 
+  /** Removes a previously added collider. Used when a vehicle is destroyed. */
+  removeCollider(collider: Collider): void {
+    const index = this.colliders.indexOf(collider);
+    if (index >= 0) this.colliders.splice(index, 1);
+  }
+
   clear(): void {
     this.colliders.length = 0;
   }
@@ -197,6 +203,128 @@ export class CollisionWorld {
     }
 
     return { grounded, hitCeiling, hitWall, groundSurface };
+  }
+
+  /**
+   * Moves a free-standing AABB — a vehicle — through the world.
+   *
+   * Unlike `move()` this takes independent half-extents rather than a radius,
+   * because a car is nothing like square in plan, and it takes an `ignore`
+   * collider so a vehicle never collides with its own registered box.
+   *
+   * @returns which axes were blocked, and the surface underfoot.
+   */
+  /** True when a box centred at (x, y, z) touches nothing. */
+  private boxFree(
+    x: number,
+    y: number,
+    z: number,
+    half: THREE.Vector3,
+    ignore: Collider | null,
+  ): boolean {
+    this.tmpBox.min.set(x - half.x, y - half.y, z - half.z);
+    this.tmpBox.max.set(x + half.x, y + half.y, z + half.z);
+    for (const c of this.colliders) {
+      if (c === ignore) continue;
+      if (c.box.intersectsBox(this.tmpBox)) return false;
+    }
+    return true;
+  }
+
+  moveBox(
+    centre: THREE.Vector3,
+    displacement: THREE.Vector3,
+    half: THREE.Vector3,
+    stepHeight = 0.3,
+    ignore: Collider | null = null,
+  ): { grounded: boolean; hitWall: boolean; groundSurface: Collider['surface'] } {
+    let grounded = false;
+    let hitWall = false;
+    let groundSurface: Collider['surface'] = 'dirt';
+    const startBottom = centre.y - half.y;
+
+    const resolve = (axis: 'x' | 'y' | 'z', delta: number): Collider | null => {
+      if (delta === 0) return null;
+      centre[axis] += delta;
+      let hit: Collider | null = null;
+
+      for (const c of this.colliders) {
+        if (c === ignore) continue;
+        this.tmpBox.min.set(centre.x - half.x, centre.y - half.y, centre.z - half.z);
+        this.tmpBox.max.set(centre.x + half.x, centre.y + half.y, centre.z + half.z);
+        if (!c.box.intersectsBox(this.tmpBox)) continue;
+        // Falling onto something far taller than a step means we are laterally
+        // *inside* a wall, not standing on a ledge — snapping to its top would
+        // park a car on the armco. Leave it for the horizontal pass to push out.
+        if (axis === 'y' && delta < 0 && c.box.max.y > startBottom + stepHeight + EPS) continue;
+        hit = c;
+        if (axis === 'y') {
+          centre.y = delta > 0 ? c.box.min.y - half.y - EPS : c.box.max.y + half.y + EPS;
+        } else if (axis === 'x') {
+          centre.x = delta > 0 ? c.box.min.x - half.x - EPS : c.box.max.x + half.x + EPS;
+        } else {
+          centre.z = delta > 0 ? c.box.min.z - half.z - EPS : c.box.max.z + half.z + EPS;
+        }
+      }
+      return hit;
+    };
+
+    const vertical = resolve('y', displacement.y);
+    if (vertical && displacement.y <= 0) {
+      grounded = true;
+      groundSurface = vertical.surface;
+    }
+
+    // Horizontal, retried from `stepHeight` up so kerbs and thresholds are
+    // driven over instead of stopping the vehicle dead.
+    const before = centre.clone();
+    const blockedX = resolve('x', displacement.x);
+    const blockedZ = resolve('z', displacement.z);
+    if (blockedX || blockedZ) {
+      hitWall = true;
+      // The raised start position has to be clear before the step is even
+      // attempted. Without that check a vehicle pushed into a wall climbs it
+      // one step per frame and ends up driving along the top of the armco.
+      if (stepHeight > 0 && this.boxFree(before.x, before.y + stepHeight, before.z, half, ignore)) {
+        const raised = before.clone();
+        raised.y += stepHeight;
+        const saveCentre = centre.clone();
+        centre.copy(raised);
+        resolve('x', displacement.x);
+        resolve('z', displacement.z);
+        const movedRaised = Math.hypot(centre.x - before.x, centre.z - before.z);
+        const movedFlat = Math.hypot(saveCentre.x - before.x, saveCentre.z - before.z);
+        if (movedRaised > movedFlat + 0.005) {
+          const drop = resolve('y', -stepHeight - EPS);
+          if (drop) {
+            grounded = true;
+            groundSurface = drop.surface;
+            hitWall = false;
+          } else {
+            centre.copy(saveCentre);
+          }
+        } else {
+          centre.copy(saveCentre);
+        }
+      }
+    }
+
+    if (!grounded && displacement.y <= 0) {
+      const probe = centre.clone();
+      probe.y -= 0.06;
+      this.tmpBox.min.set(probe.x - half.x, probe.y - half.y, probe.z - half.z);
+      this.tmpBox.max.set(probe.x + half.x, probe.y + half.y, probe.z + half.z);
+      for (const c of this.colliders) {
+        if (c === ignore) continue;
+        if (c.box.intersectsBox(this.tmpBox)) {
+          grounded = true;
+          groundSurface = c.surface;
+          break;
+        }
+      }
+    }
+
+    return { grounded, hitWall, groundSurface };
   }
 
   /**

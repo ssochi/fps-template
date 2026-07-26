@@ -2,8 +2,8 @@
 
 A complete, batteries-included first/third person shooter template built with **Three.js + TypeScript + Vite**.
 
-It ships with **two maps** — a full shooting range and a race circuit whose garage holds three heavily
-detailed vehicles — plus **ten distinct weapons**, **frag / smoke / flash grenades**, first *and* third
+It ships with **two maps** — a full shooting range, and a race circuit whose garage holds three heavily
+detailed **drivable** vehicles — plus **ten distinct weapons**, **frag / smoke / flash grenades**, first *and* third
 person cameras, procedural weapon models, procedural character animation with IK, a pooled effects
 system, and a synthesized audio engine — **with zero binary assets**. Everything (textures, models,
 sounds) is generated at runtime, so the repo clones and runs instantly and works offline.
@@ -54,6 +54,18 @@ Requires Node 20.19+ / 22.12+.
 | `K` | Start / cancel the timed drill |
 | `L` | Reset all targets |
 | `M` | Next map (also selectable from the start and pause screens) |
+
+### Driving
+
+| Input | Action |
+| --- | --- |
+| `E` | Get in / out of a vehicle |
+| `W` / `S` | Throttle / brake, then reverse |
+| `A` / `D` | Steer |
+| `Space` | Handbrake |
+| `Mouse` | Look around — on the tank this traverses the turret and elevates the gun |
+| `Mouse 1` | Fire the 120 mm main gun (tank) |
+| `V` | Chase / cockpit camera |
 | `H` | Toggle HUD |
 | `P` | Toggle collision debug wireframes |
 | `Esc` | Pause / settings |
@@ -188,8 +200,26 @@ all come out of the same sixty lines. Roll cages, bull bars and tow cables are s
   thermal sleeve, fume extractor and muzzle brake, commander's cupola with vision blocks and a pintle MG,
   smoke-grenade launchers, a rear stowage basket, tow cables, spare track links and antennas.
 
-Vehicles never animate, so each is baked into the level's static batch — one draw call per material
-instead of one per bolt — while still registering collision boxes and staying shootable.
+All three are drivable. `VehicleSystem` owns them: the hull is flattened to one mesh per material, while
+the wheels (steer pivot + spin node) and the tank's turret and gun trunnion stay live. A parked vehicle
+holds a collider so you bump into it; the one you are driving has that collider emptied, because it must
+not collide with itself.
+
+The driving model is arcade rather than simulation — a single forward speed scalar plus a yaw, with no
+solver. Wheeled vehicles turn on a bicycle model (yaw rate = speed · tan(steer) / wheelbase) with steering
+authority that decays with speed; the tank skid-steers and can pivot on the spot. Everything moves through
+the same AABB collision world via `CollisionWorld.moveBox`, with a step height generous enough to ride
+kerbs and the garage threshold. Balance lives in one object per vehicle in
+`src/vehicles/VehicleConfigs.ts`.
+
+**Lap timing.** The circuit exposes a `LapCourse` — a start/finish line plus three checkpoints. A lap
+counts only when you cross the line in the racing direction *having passed every checkpoint*, so it can
+neither be gamed by shuffling over the line nor by cutting the infield. Current, last and best lap are on
+the dash.
+
+**The tank's gun.** `Mouse 1` fires a shell with a real muzzle velocity and gravity; it is traced against
+the world each step, and on impact it goes through the same explosion path as a frag grenade — blast
+falloff, line-of-sight checks and all. Reload is gated and shown on the dash.
 
 ### Scene and lighting
 No ray tracing — everything is conventional forward rendering, tuned so the space reads as a real place:
@@ -232,6 +262,10 @@ src/
 │   ├── CameraController.ts     First/third person placement, recoil, bob, shake, FOV
 │   ├── ViewModel.ts            First-person weapon scene + procedural animation
 │   └── CharacterModel.ts       Third-person humanoid, walk cycle, two-bone IK arms
+├── vehicles/
+│   ├── VehicleConfigs.ts       Driving balance, one object per vehicle
+│   ├── VehicleSystem.ts        Driving physics, enter/exit, turret, shells
+│   └── LapTimer.ts             Checkpoint-gated lap counting
 ├── weapons/
 │   ├── WeaponTypes.ts          The config schema — every tunable lives here
 │   ├── WeaponConfigs.ts        The ten weapons' balance data
@@ -317,9 +351,25 @@ Two things worth knowing before you build a large outdoor level:
 
 ### Add a vehicle
 
-Add an id to `VehicleId` in `src/world/Vehicles.ts` and a builder returning `{ root, colliders, size }`.
-Build it nose-`+Z` with the origin on the ground; `loft()`, `tube()`, `axle()`, `bothSides()` and
-`buildWheel()` cover most of what a vehicle needs.
+1. Add an id to `VehicleId` in `src/world/Vehicles.ts` and a builder returning a `VehicleBuildResult`.
+   Build it nose-`+Z` with the origin on the ground; `loft()`, `tube()`, `axle()`, `bothSides()` and
+   `buildWheel()` cover most of what a vehicle needs. Hang the wheels with `mountWheel()` so they end up
+   in `parts.wheels` with a steer pivot and a spin node.
+2. Add a `VehicleConfig` in `src/vehicles/VehicleConfigs.ts`. Give it a `cannon` block if it should shoot.
+3. Add a spawn to the level's `vehicleSpawns`.
+
+Nothing else changes: enter/exit, the dash, the chase camera and lap timing all read from the config and
+the parts.
+
+Two things to get right when modelling one:
+
+- **Wind the hull outward.** `loft()` walks each cross-section before stepping to the next one for exactly
+  this reason — the obvious ordering winds every side inward, back-face culling then removes the surfaces
+  facing the viewer, and you see straight through the vehicle to the inside of its far wall. The end caps
+  use a different ordering and stay correct, which makes it easy to miss.
+- **An open cockpit has to actually be open.** Model the tub as a solid body whose top surface *is* the
+  floor and add the sides back as separate panels. A closed loft that merely looks open because its roof
+  is being culled will seal the interior in the moment the winding is fixed.
 
 ### Tune the feel
 
