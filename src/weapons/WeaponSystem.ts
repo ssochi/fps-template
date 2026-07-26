@@ -513,14 +513,18 @@ export class WeaponSystem {
     const cfg = this.config;
     const mode = this.fireMode;
 
-    // Burst continuation runs even after the trigger is released.
+    // Burst continuation runs even after the trigger is released. The shot is
+    // gated on the fire cooldown as well as the burst delay, so a burst delay
+    // shorter than the weapon's cycle time simply fires at the weapon's RPM
+    // instead of cancelling the rest of the burst.
     if (this.burstRemaining > 0) {
       this.burstTimer -= dt;
-      if (this.burstTimer <= 0) {
+      if (this.burstTimer <= 0 && this.fireCooldown <= 0) {
         if (this.tryFire()) {
           this.burstRemaining--;
           this.burstTimer = cfg.burstDelay;
         } else {
+          // Out of ammo or otherwise blocked — abandon the rest of the burst.
           this.burstRemaining = 0;
         }
       }

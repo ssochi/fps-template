@@ -19,7 +19,7 @@ export const PISTOL: WeaponConfig = {
   falloffStart: 18,
   falloffEnd: 55,
   minDamageScale: 0.55,
-  penetration: 1,
+  penetration: 0,
   penetrationDamageScale: 0.5,
   muzzleVelocity: 380,
 
@@ -111,7 +111,7 @@ export const SMG: WeaponConfig = {
   falloffStart: 12,
   falloffEnd: 38,
   minDamageScale: 0.45,
-  penetration: 1,
+  penetration: 0,
   penetrationDamageScale: 0.45,
   muzzleVelocity: 400,
 
@@ -220,7 +220,7 @@ export const RIFLE: WeaponConfig = {
   rpm: 640,
   fireModes: ['auto', 'burst', 'semi'],
   burstCount: 3,
-  burstDelay: 0.075,
+  burstDelay: 0.09,
   actionType: 'gas',
   cycleTime: 0,
 
@@ -412,7 +412,7 @@ export const SHOTGUN: WeaponConfig = {
   falloffStart: 8,
   falloffEnd: 26,
   minDamageScale: 0.12,
-  penetration: 1,
+  penetration: 0,
   penetrationDamageScale: 0.3,
   muzzleVelocity: 400,
 

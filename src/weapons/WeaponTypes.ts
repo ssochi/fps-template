@@ -80,7 +80,7 @@ export interface WeaponConfig {
   /** Distance (m) at which damage reaches `minDamageScale`. */
   falloffEnd: number;
   minDamageScale: number;
-  /** How many surfaces a round can punch through. */
+  /** How many surfaces a round can punch through. 0 stops at the first hit. */
   penetration: number;
   /** Damage retained after each penetrated surface. */
   penetrationDamageScale: number;

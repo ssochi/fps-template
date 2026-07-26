@@ -50,6 +50,11 @@ const HIP_ROTATION = new THREE.Euler(0.015, 0.06, 0.0);
 const SPRINT_ROTATION = new THREE.Euler(0.32, 0.75, -0.3);
 /** Metres of clearance kept between the weapon's rear-most point and the eye. */
 const STOCK_CLEARANCE = 0.14;
+/**
+ * ADS blend at which a scoped weapon's model is hidden. Must stay below the
+ * point where `HUD` makes the scope overlay fully opaque.
+ */
+export const SCOPE_HIDE_THRESHOLD = 0.8;
 
 export class ViewModel {
   readonly scene = new THREE.Scene();
@@ -355,14 +360,14 @@ export class ViewModel {
 
     const s = config.flashScale;
     for (let i = 0; i < 3; i++) {
-      const size = s * (0.1 + Math.random() * 0.09);
+      const size = s * (0.065 + Math.random() * 0.055);
       this.flashPlanes[i].scale.set(size, size, size);
       this.flashPlanes[i].position.set(0, 0, -0.01 - i * 0.008);
       this.flashPlanes[i].rotation.z = Math.random() * Math.PI * 2;
       (this.flashPlanes[i].material as THREE.MeshBasicMaterial).color.setHex(config.flashColor);
     }
     const cone = this.flashPlanes[3];
-    cone.scale.set(s * 0.05, s * 0.05, s * (0.09 + Math.random() * 0.07));
+    cone.scale.set(s * 0.038, s * 0.038, s * (0.07 + Math.random() * 0.055));
     (cone.material as THREE.MeshBasicMaterial).color.setHex(config.flashColor);
 
     this.flashLight.color.setHex(config.flashColor);
@@ -480,8 +485,11 @@ export class ViewModel {
     this.weaponHolder.position.copy(this.posOffset);
     this.weaponHolder.rotation.copy(this.rotOffset);
 
-    // Hide the arms while scoped so they don't cover the scope picture.
-    this.arms.visible = !(config.scopeFov !== undefined && frame.ads > 0.7);
+    // Once the scope overlay takes over the screen the weapon itself would
+    // only obscure the sight picture, so hide the whole rig behind it.
+    const scoped = config.scopeFov !== undefined && frame.ads > SCOPE_HIDE_THRESHOLD;
+    this.arms.visible = !scoped;
+    this.weaponHolder.visible = !scoped;
     if (this.model.scopeLens) {
       // Dim the ocular when not looking through it.
       const mat = (this.model.scopeLens as THREE.Mesh).material as THREE.MeshStandardMaterial;

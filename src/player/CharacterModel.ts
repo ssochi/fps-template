@@ -124,6 +124,7 @@ export class CharacterModel {
   private leanSpring = new Spring(60, 12);
   private aimPitchSmooth = 0;
   private turnBlend = 0;
+  private fireBlend = 0;
   private deathTimer = 0;
 
   private readonly tmpA = new THREE.Vector3();
@@ -314,6 +315,8 @@ export class CharacterModel {
 
   onFire(config: WeaponConfig): void {
     this.recoilSpring.kick(config.recoil.modelPitch * 1.4);
+    // Snap the weapon up out of low-ready; decays back over ~1.2 s.
+    this.fireBlend = 1;
   }
 
   /** Hides the torso, head, arms and weapon while in first person. */
@@ -438,23 +441,29 @@ export class CharacterModel {
   }
 
   private updateWeaponPose(dt: number, frame: CharacterFrame, recoilKick: number): void {
+    // Hip firing still raises the weapon, so recent shots count toward the
+    // "shouldered" blend alongside actually aiming.
+    this.fireBlend = Math.max(0, this.fireBlend - dt * 0.85);
+    const shouldered = Math.max(frame.ads, this.fireBlend);
+
     // Low-ready when idle, shouldered when aiming. Kept close enough to the
     // chest that the support arm can actually reach the weapon's fore-end.
     const readyPos = this.tmpA.set(0.12, -0.03, -0.1);
     const aimPos = this.tmpB.set(0.05, 0.07, -0.12);
-    const target = readyPos.lerp(aimPos, frame.ads);
+    const target = readyPos.lerp(aimPos, shouldered);
 
     // Sprinting drops the weapon across the body.
-    if (frame.sprinting && frame.ads < 0.2) {
+    if (frame.sprinting && shouldered < 0.2) {
       target.lerp(this.tmpC.set(0.14, -0.13, -0.06), Math.min(1, frame.moveIntensity));
     }
 
     this.weaponMount.position.lerp(target, 1 - Math.exp(-14 * dt));
 
     const pitch = this.aimPitchSmooth + recoilKick * 0.7;
-    const readyPitch = lerp(-0.3, 0, frame.ads);
-    const readyYaw = lerp(-0.14, 0, frame.ads);
-    const sprintYaw = frame.sprinting && frame.ads < 0.2 ? 0.5 * frame.moveIntensity : readyYaw;
+    const readyPitch = lerp(-0.22, 0, shouldered);
+    const readyYaw = lerp(-0.12, 0, shouldered);
+    const sprintYaw =
+      frame.sprinting && shouldered < 0.2 ? 0.5 * frame.moveIntensity : readyYaw;
     this.weaponMount.rotation.x = damp(
       this.weaponMount.rotation.x,
       pitch + readyPitch + (this.chest.rotation.x * -1 + this.spine.rotation.x * -1),
@@ -464,7 +473,7 @@ export class CharacterModel {
     this.weaponMount.rotation.y = damp(this.weaponMount.rotation.y, sprintYaw, 12, dt);
     this.weaponMount.rotation.z = damp(
       this.weaponMount.rotation.z,
-      frame.sprinting && frame.ads < 0.2 ? -0.45 * frame.moveIntensity : 0,
+      frame.sprinting && shouldered < 0.2 ? -0.45 * frame.moveIntensity : 0,
       12,
       dt,
     );
@@ -592,6 +601,7 @@ export class CharacterModel {
 
   reset(): void {
     this.deathTimer = 0;
+    this.fireBlend = 0;
     this.root.rotation.set(0, 0, 0);
     this.hips.position.y = 0.98;
     this.recoilSpring.reset();
