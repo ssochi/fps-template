@@ -47,6 +47,34 @@ export interface VehicleConfig {
   bodyRollGain: number;
   gears: number;
   engine: { idle: number; redline: number; timbre: 'v12' | 'petrol' | 'diesel' };
+  /** Walking mech only: stride, torso twist and armament. */
+  mech?: {
+    /** Metres of travel per full two-step stride. */
+    strideLength: number;
+    /** How far the hip swings at full stride, radians. */
+    hipSwing: number;
+    /** Extra knee bend through the swing phase, radians. */
+    kneeBend: number;
+    /** Vertical body bob per footfall, metres. */
+    bob: number;
+    /** How far the torso may twist off the chassis heading, radians. */
+    torsoTwist: number;
+    /** Torso traverse and gun elevation rates, rad/s. */
+    twistRate: number;
+    elevateRate: number;
+    /** Arm cannons: hitscan, alternating between the four barrels. */
+    cannon: { rpm: number; damage: number; spread: number; range: number };
+    /** Shoulder missile pods. */
+    barrage: {
+      count: number;
+      damage: number;
+      blastRadius: number;
+      cooldown: number;
+      speed: number;
+      spread: number;
+    };
+  };
+
   /** Tank only. */
   cannon?: {
     /** Muzzle velocity, m/s. */
@@ -135,6 +163,42 @@ export const VEHICLE_CONFIGS: Record<VehicleId, VehicleConfig> = {
       blastRadius: 11,
       reload: 4.2,
       recoil: 1.6,
+    },
+  },
+  thor: {
+    id: 'thor',
+    name: 'THOR ASSAULT MECH',
+    // Deliberately ponderous: a nine-metre machine that accelerates like a car
+    // reads as weightless, whatever the model looks like.
+    maxSpeed: 7.5,
+    maxReverse: 3.6,
+    accel: 3.2,
+    brake: 6,
+    drag: 0.08,
+    rollingResistance: 5.0,
+    maxSteer: 0,
+    steerRate: 3,
+    steerFalloff: 0,
+    wheelbase: 3,
+    tracked: true,
+    turnRate: 0.85,
+    half: new THREE.Vector3(1.9, 2.2, 1.9),
+    centreY: 2.2,
+    handbrakeSlip: 0,
+    bodyPitchGain: 0.012,
+    bodyRollGain: 0.02,
+    gears: 1,
+    engine: { idle: 400, redline: 1400, timbre: 'diesel' },
+    mech: {
+      strideLength: 6.4,
+      hipSwing: 0.42,
+      kneeBend: 0.72,
+      bob: 0.2,
+      torsoTwist: 1.9,
+      twistRate: 2.2,
+      elevateRate: 1.5,
+      cannon: { rpm: 260, damage: 26, spread: 0.55, range: 220 },
+      barrage: { count: 6, damage: 70, blastRadius: 7, cooldown: 6, speed: 55, spread: 0.06 },
     },
   },
 };

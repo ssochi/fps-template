@@ -1,5 +1,16 @@
 import * as THREE from 'three';
-import { createCanvasTexture } from './Materials';
+import {
+  axle,
+  bothSides,
+  loft,
+  mesh,
+  mountWheel,
+  tube,
+  type VehicleBuildResult,
+  type WheelNode,
+} from './ModelKit';
+import { createVehicleMaterials } from './VehicleMaterials';
+import { buildThor } from './Thor';
 
 /**
  * Procedural vehicle models: a hypercar, a 4x4 and a main battle tank.
@@ -13,52 +24,15 @@ import { createCanvasTexture } from './Materials';
  * cross-sections, which is what lets a wedge-shaped hypercar nose, a sloped
  * tank glacis and a boxy jeep tub all come out of the same 60 lines.
  *
- * Nothing here animates, so callers are expected to merge the result — see
- * `mergeStaticHierarchy` — collapsing a few hundred primitives per vehicle into
- * one draw call per material.
+ * The hull of each never animates, so callers are expected to flatten
+ * `parts.body` — see `mergeStaticHierarchy` — collapsing a few hundred
+ * primitives into one draw call per material.
  */
 
-export type VehicleId = 'supercar' | 'jeep' | 'tank';
+export type VehicleId = 'supercar' | 'jeep' | 'tank' | 'thor';
 
-/** A wheel's steering pivot and its spin node, kept apart from the hull. */
-export interface WheelNode {
-  /** Steers about Y; sits at the wheel centre. */
-  pivot: THREE.Group;
-  /** Spins about X. The mirrored model lives inside, so both sides spin alike. */
-  spinner: THREE.Group;
-  radius: number;
-  steered: boolean;
-  /** Drives the suspension-travel offset applied by the vehicle system. */
-  restY: number;
-}
-
-/** Everything on a vehicle that moves independently of its hull. */
-export interface VehicleParts {
-  /** Static hull; safe to flatten to one mesh per material. */
-  body: THREE.Group;
-  wheels: WheelNode[];
-  /** Tank only: traverses about Y. */
-  turret: THREE.Group | null;
-  /** Tank only: elevates about X, inside `turret`. */
-  barrel: THREE.Group | null;
-  /** Tank only: muzzle anchor for shells, inside `barrel`. */
-  muzzle: THREE.Object3D | null;
-}
-
-export interface VehicleBuildResult {
-  root: THREE.Group;
-  parts: VehicleParts;
-  /** Local-space collision boxes, `{ centre, size }`, for the caller to place. */
-  colliders: { centre: THREE.Vector3; size: THREE.Vector3 }[];
-  /** Overall bounds, handy for signage and camera framing. */
-  size: THREE.Vector3;
-  /** Local offset of the driver's eye, for the in-cab camera. */
-  driverEye: THREE.Vector3;
-  /** Local point the chase camera orbits. */
-  cameraPivot: THREE.Vector3;
-  /** Local offset the player is dropped at when they get out. */
-  exitOffset: THREE.Vector3;
-}
+export type { VehicleBuildResult, VehicleParts, WheelNode, MechParts, MechLeg } from './ModelKit';
+export { createVehicleMaterials, type VehicleMaterials } from './VehicleMaterials';
 
 export interface VehicleDescriptor {
   id: VehicleId;
@@ -70,373 +44,8 @@ export const VEHICLES: readonly VehicleDescriptor[] = [
   { id: 'supercar', name: 'MERIDIAN GT-9', subtitle: 'HYPERCAR · 1040 HP' },
   { id: 'jeep', name: 'FIELD ROVER 4X4', subtitle: 'UTILITY · ALL-TERRAIN' },
   { id: 'tank', name: 'M-77 WARDEN', subtitle: 'MAIN BATTLE TANK · 120 MM' },
+  { id: 'thor', name: 'THOR ASSAULT MECH', subtitle: 'WALKER · TWIN CANNONS + JAVELINS' },
 ];
-
-// --------------------------------------------------------------- primitives
-
-interface Section {
-  /** Position along the vehicle's long axis. */
-  z: number;
-  halfWidth: number;
-  bottom: number;
-  top: number;
-}
-
-/**
- * Skins a run of rectangular cross-sections into a closed hull.
- *
- * Triangles are emitted un-indexed so `computeVertexNormals` gives flat,
- * per-facet shading — which is exactly the faceted panel look the rest of the
- * template is built in, and it keeps every hull a single cheap geometry.
- */
-function loft(sections: Section[]): THREE.BufferGeometry {
-  const positions: number[] = [];
-  const uvs: number[] = [];
-
-  const corners = (s: Section): THREE.Vector3[] => [
-    new THREE.Vector3(-s.halfWidth, s.bottom, s.z),
-    new THREE.Vector3(s.halfWidth, s.bottom, s.z),
-    new THREE.Vector3(s.halfWidth, s.top, s.z),
-    new THREE.Vector3(-s.halfWidth, s.top, s.z),
-  ];
-
-  const quad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3): void => {
-    for (const v of [a, b, c, a, c, d]) positions.push(v.x, v.y, v.z);
-    // Cheap planar UVs — good enough for the noise-based materials in use.
-    for (const [u, w] of [
-      [0, 0],
-      [1, 0],
-      [1, 1],
-      [0, 0],
-      [1, 1],
-      [0, 1],
-    ]) {
-      uvs.push(u, w);
-    }
-  };
-
-  // Each side walks its own cross-section first, *then* steps to the next one.
-  // Going around the ring first (a[n] -> b[n] -> b[n+1]) is the obvious
-  // ordering and is wrong: it winds every side inward, so back-face culling
-  // removes the surfaces facing the viewer and you see straight through the
-  // hull to the inside of its far wall. The end caps below are unaffected,
-  // which is what makes it easy to miss.
-  for (let i = 0; i < sections.length - 1; i++) {
-    const a = corners(sections[i]);
-    const b = corners(sections[i + 1]);
-    quad(a[0], a[1], b[1], b[0]); // bottom
-    quad(a[1], a[2], b[2], b[1]); // right
-    quad(a[2], a[3], b[3], b[2]); // top
-    quad(a[3], a[0], b[0], b[3]); // left
-  }
-
-  // End caps, wound outward.
-  const first = corners(sections[0]);
-  quad(first[0], first[3], first[2], first[1]);
-  const last = corners(sections[sections.length - 1]);
-  quad(last[0], last[1], last[2], last[3]);
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geo.computeVertexNormals();
-  return geo;
-}
-
-/** A swept tube through a set of points — roll cages, tow cables, bull bars. */
-function tube(points: [number, number, number][], radius: number, segments = 8): THREE.BufferGeometry {
-  const curve = new THREE.CatmullRomCurve3(points.map((p) => new THREE.Vector3(p[0], p[1], p[2])));
-  return new THREE.TubeGeometry(curve, Math.max(8, points.length * segments), radius, 7, false);
-}
-
-function mesh(
-  parent: THREE.Object3D,
-  geo: THREE.BufferGeometry,
-  material: THREE.Material,
-  position: [number, number, number] = [0, 0, 0],
-  rotation: [number, number, number] = [0, 0, 0],
-): THREE.Mesh {
-  const m = new THREE.Mesh(geo, material);
-  m.position.set(position[0], position[1], position[2]);
-  m.rotation.set(rotation[0], rotation[1], rotation[2]);
-  m.castShadow = true;
-  m.receiveShadow = true;
-  parent.add(m);
-  return m;
-}
-
-/**
- * Hangs a wheel model on a steer pivot and a spin node.
- *
- * The mirrored model goes *inside* the spinner rather than on it, so the same
- * `spinner.rotation.x` turns both sides the same way in world space — mirroring
- * the spin node itself would have the left wheels rolling backwards.
- */
-function mountWheel(
-  parent: THREE.Object3D,
-  model: THREE.Group,
-  position: [number, number, number],
-  mirrored: boolean,
-  radius: number,
-  steered: boolean,
-  out: WheelNode[],
-): void {
-  const pivot = new THREE.Group();
-  pivot.position.set(position[0], position[1], position[2]);
-  const spinner = new THREE.Group();
-  if (mirrored) model.rotation.y = Math.PI;
-  spinner.add(model);
-  pivot.add(spinner);
-  parent.add(pivot);
-  out.push({ pivot, spinner, radius, steered, restY: position[1] });
-}
-
-/** Adds `build` twice, mirrored across the centreline. */
-function bothSides(build: (side: 1 | -1) => void): void {
-  build(1);
-  build(-1);
-}
-
-/** A cylinder lying on the X axis — the orientation every wheel and axle wants. */
-function axle(radiusTop: number, radiusBottom: number, length: number, segments = 20): THREE.BufferGeometry {
-  const geo = new THREE.CylinderGeometry(radiusTop, radiusBottom, length, segments);
-  geo.rotateZ(Math.PI / 2);
-  return geo;
-}
-
-// ---------------------------------------------------------------- materials
-
-export interface VehicleMaterials {
-  carPaint: THREE.MeshStandardMaterial;
-  carPaintDark: THREE.MeshStandardMaterial;
-  carbon: THREE.MeshStandardMaterial;
-  carGlass: THREE.MeshPhysicalMaterial;
-  chrome: THREE.MeshStandardMaterial;
-  rubber: THREE.MeshStandardMaterial;
-  rimGold: THREE.MeshStandardMaterial;
-  brakeDisc: THREE.MeshStandardMaterial;
-  caliper: THREE.MeshStandardMaterial;
-  tailLight: THREE.MeshStandardMaterial;
-  headLight: THREE.MeshStandardMaterial;
-  interior: THREE.MeshStandardMaterial;
-  livery: THREE.MeshStandardMaterial;
-  engineRed: THREE.MeshStandardMaterial;
-  jeepBody: THREE.MeshStandardMaterial;
-  jeepDark: THREE.MeshStandardMaterial;
-  canvasTop: THREE.MeshStandardMaterial;
-  jeepGlass: THREE.MeshPhysicalMaterial;
-  star: THREE.MeshStandardMaterial;
-  tankHull: THREE.MeshStandardMaterial;
-  tankDark: THREE.MeshStandardMaterial;
-  track: THREE.MeshStandardMaterial;
-  optic: THREE.MeshStandardMaterial;
-  amber: THREE.MeshStandardMaterial;
-}
-
-let cached: VehicleMaterials | null = null;
-
-function carbonTexture(): THREE.Texture {
-  return createCanvasTexture(
-    256,
-    (ctx, size) => {
-      ctx.fillStyle = '#14161a';
-      ctx.fillRect(0, 0, size, size);
-      const cell = size / 16;
-      for (let y = 0; y < 16; y++) {
-        for (let x = 0; x < 16; x++) {
-          // Alternating warp/weft blocks read as a 2x2 twill at any sane range.
-          const warp = (x + y) % 2 === 0;
-          const g = ctx.createLinearGradient(
-            x * cell,
-            y * cell,
-            warp ? (x + 1) * cell : x * cell,
-            warp ? y * cell : (y + 1) * cell,
-          );
-          g.addColorStop(0, '#22262c');
-          g.addColorStop(0.5, '#0e1013');
-          g.addColorStop(1, '#22262c');
-          ctx.fillStyle = g;
-          ctx.fillRect(x * cell, y * cell, cell, cell);
-        }
-      }
-    },
-    { repeat: 4 },
-  );
-}
-
-function camoTexture(): THREE.Texture {
-  return createCanvasTexture(
-    512,
-    (ctx, size) => {
-      ctx.fillStyle = '#4d5540';
-      ctx.fillRect(0, 0, size, size);
-      const blobs: [string, number, number][] = [
-        ['#39412f', 26, 52],
-        ['#5b4c35', 20, 40],
-        ['#24281f', 14, 34],
-      ];
-      for (const [colour, count, radius] of blobs) {
-        ctx.fillStyle = colour;
-        for (let i = 0; i < count; i++) {
-          const cx = Math.random() * size;
-          const cy = Math.random() * size;
-          ctx.beginPath();
-          // Irregular lobed blob rather than a circle, so it reads as camo.
-          for (let a = 0; a <= Math.PI * 2 + 0.01; a += Math.PI / 8) {
-            const r = radius * (0.55 + Math.random() * 0.7);
-            const x = cx + Math.cos(a) * r;
-            const y = cy + Math.sin(a) * r * 0.8;
-            if (a === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-          }
-          ctx.closePath();
-          ctx.fill();
-        }
-      }
-    },
-    { repeat: 2 },
-  );
-}
-
-function liveryTexture(): THREE.Texture {
-  return createCanvasTexture(512, (ctx, size) => {
-    ctx.fillStyle = '#b01d2a';
-    ctx.fillRect(0, 0, size, size);
-    ctx.fillStyle = '#f2f2ee';
-    ctx.beginPath();
-    ctx.moveTo(0, size * 0.62);
-    ctx.lineTo(size, size * 0.34);
-    ctx.lineTo(size, size * 0.66);
-    ctx.lineTo(0, size * 0.94);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#12161b';
-    ctx.font = `bold ${size * 0.38}px "Arial Black", sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('07', size * 0.28, size * 0.44);
-    ctx.font = `bold ${size * 0.1}px sans-serif`;
-    ctx.fillStyle = '#f2f2ee';
-    ctx.fillText('MERIDIAN', size * 0.68, size * 0.24);
-  });
-}
-
-function starTexture(): THREE.Texture {
-  return createCanvasTexture(256, (ctx, size) => {
-    ctx.fillStyle = '#4a5238';
-    ctx.fillRect(0, 0, size, size);
-    ctx.strokeStyle = '#e6e2d0';
-    ctx.fillStyle = '#e6e2d0';
-    ctx.lineWidth = size * 0.03;
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, size * 0.42, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.beginPath();
-    for (let i = 0; i < 10; i++) {
-      const a = -Math.PI / 2 + (i * Math.PI) / 5;
-      const r = i % 2 === 0 ? size * 0.38 : size * 0.16;
-      const x = size / 2 + Math.cos(a) * r;
-      const y = size / 2 + Math.sin(a) * r;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    ctx.fill();
-  });
-}
-
-export function createVehicleMaterials(): VehicleMaterials {
-  if (cached) return cached;
-
-  const carbonMap = carbonTexture();
-  cached = {
-    carPaint: new THREE.MeshStandardMaterial({
-      color: 0x9c1420,
-      roughness: 0.22,
-      metalness: 0.75,
-    }),
-    carPaintDark: new THREE.MeshStandardMaterial({
-      color: 0x17191d,
-      roughness: 0.3,
-      metalness: 0.7,
-    }),
-    carbon: new THREE.MeshStandardMaterial({
-      map: carbonMap,
-      color: 0xffffff,
-      roughness: 0.38,
-      metalness: 0.45,
-    }),
-    carGlass: new THREE.MeshPhysicalMaterial({
-      color: 0x121a20,
-      roughness: 0.05,
-      metalness: 0.1,
-      transmission: 0.72,
-      thickness: 0.03,
-      transparent: true,
-      opacity: 0.55,
-    }),
-    chrome: new THREE.MeshStandardMaterial({ color: 0xc6ced8, roughness: 0.15, metalness: 1.0 }),
-    rubber: new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.96, metalness: 0.0 }),
-    rimGold: new THREE.MeshStandardMaterial({ color: 0xb08a3c, roughness: 0.28, metalness: 0.95 }),
-    brakeDisc: new THREE.MeshStandardMaterial({ color: 0x2a2622, roughness: 0.55, metalness: 0.6 }),
-    caliper: new THREE.MeshStandardMaterial({ color: 0xd8a41c, roughness: 0.4, metalness: 0.4 }),
-    tailLight: new THREE.MeshStandardMaterial({
-      color: 0x2a0304,
-      emissive: 0xff1a20,
-      emissiveIntensity: 2.6,
-      roughness: 0.35,
-    }),
-    headLight: new THREE.MeshStandardMaterial({
-      color: 0x0d1116,
-      emissive: 0xdfeaff,
-      emissiveIntensity: 2.2,
-      roughness: 0.2,
-    }),
-    interior: new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.85, metalness: 0.05 }),
-    livery: new THREE.MeshStandardMaterial({
-      map: liveryTexture(),
-      roughness: 0.3,
-      metalness: 0.4,
-      side: THREE.DoubleSide,
-    }),
-    engineRed: new THREE.MeshStandardMaterial({ color: 0x8c1a12, roughness: 0.4, metalness: 0.7 }),
-    jeepBody: new THREE.MeshStandardMaterial({ color: 0x4e5840, roughness: 0.78, metalness: 0.2 }),
-    jeepDark: new THREE.MeshStandardMaterial({ color: 0x2b2f28, roughness: 0.7, metalness: 0.4 }),
-    canvasTop: new THREE.MeshStandardMaterial({
-      color: 0x51553f,
-      roughness: 0.95,
-      metalness: 0.0,
-      side: THREE.DoubleSide,
-    }),
-    jeepGlass: new THREE.MeshPhysicalMaterial({
-      color: 0xa8c0cc,
-      roughness: 0.12,
-      metalness: 0.0,
-      transmission: 0.8,
-      thickness: 0.02,
-      transparent: true,
-      opacity: 0.4,
-    }),
-    star: new THREE.MeshStandardMaterial({ map: starTexture(), roughness: 0.85, side: THREE.DoubleSide }),
-    tankHull: new THREE.MeshStandardMaterial({ map: camoTexture(), roughness: 0.88, metalness: 0.28 }),
-    tankDark: new THREE.MeshStandardMaterial({ color: 0x2f342a, roughness: 0.75, metalness: 0.5 }),
-    track: new THREE.MeshStandardMaterial({ color: 0x33352f, roughness: 0.72, metalness: 0.6 }),
-    optic: new THREE.MeshStandardMaterial({
-      color: 0x0a1418,
-      emissive: 0x2a6f7a,
-      emissiveIntensity: 0.9,
-      roughness: 0.15,
-      metalness: 0.4,
-    }),
-    amber: new THREE.MeshStandardMaterial({
-      color: 0x201200,
-      emissive: 0xffa63c,
-      emissiveIntensity: 1.8,
-      roughness: 0.4,
-    }),
-  };
-  return cached;
-}
 
 // ------------------------------------------------------------------- wheels
 
@@ -741,7 +350,7 @@ function buildSupercar(): VehicleBuildResult {
 
   return {
     root,
-    parts: { body, wheels, turret: null, barrel: null, muzzle: null },
+    parts: { body, wheels, turret: null, barrel: null, muzzle: null, mech: null },
     colliders: [
       { centre: new THREE.Vector3(0, 0.6, 0), size: new THREE.Vector3(2.05, 1.2, 4.7) },
     ],
@@ -1019,7 +628,7 @@ function buildJeep(): VehicleBuildResult {
 
   return {
     root,
-    parts: { body, wheels, turret: null, barrel: null, muzzle: null },
+    parts: { body, wheels, turret: null, barrel: null, muzzle: null, mech: null },
     colliders: [
       { centre: new THREE.Vector3(0, 0.95, -0.05), size: new THREE.Vector3(1.95, 1.9, 4.3) },
     ],
@@ -1340,7 +949,7 @@ function buildTank(): VehicleBuildResult {
 
   return {
     root,
-    parts: { body, wheels, turret, barrel, muzzle },
+    parts: { body, wheels, turret, barrel, muzzle, mech: null },
     colliders: [
       { centre: new THREE.Vector3(0, 1.1, -0.2), size: new THREE.Vector3(4.2, 2.2, 7.2) },
       { centre: new THREE.Vector3(0, 2.2, -0.6), size: new THREE.Vector3(2.4, 0.9, 3.6) },
@@ -1364,5 +973,7 @@ export function buildVehicle(id: VehicleId): VehicleBuildResult {
       return buildJeep();
     case 'tank':
       return buildTank();
+    case 'thor':
+      return buildThor();
   }
 }

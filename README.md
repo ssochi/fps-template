@@ -64,7 +64,8 @@ Requires Node 20.19+ / 22.12+.
 | `A` / `D` | Steer |
 | `Space` | Handbrake |
 | `Mouse` | Look around — on the tank this traverses the turret and elevates the gun |
-| `Mouse 1` | Fire the 120 mm main gun (tank) |
+| `Mouse 1` | Fire the 120 mm main gun (tank) or the twin arm cannons (Thor) |
+| `Mouse 2` | Javelin missile salvo (Thor) |
 | `V` | Chase / cockpit camera |
 | `H` | Toggle HUD |
 | `P` | Toggle collision debug wireframes |
@@ -178,6 +179,40 @@ rebuilds — the player, weapons and HUD simply re-point.
 - A service-road gunnery range east of the pits — benches, five lanes, distance markers and a stop butt —
   so the scoring, drills and every weapon still have somewhere to work.
 
+### The Thor
+
+`src/world/Thor.ts` builds a Terran heavy assault mech in the mould of StarCraft II's Thor, and it is
+pilotable: it walks, twists its torso to track your aim, and shoots. There is one on a marked hardstand on
+each map.
+
+The silhouette is what carries the design: a small head with a glowing visor sunk between enormous
+hazard-striped pauldrons, a deep slab-sided chest wearing the Terran skull-and-wings roundel, stubby arms
+carrying twin cannons longer than the torso, shoulder missile pods, exhaust stacks over the engine deck,
+and wide splayed three-toed feet. Everything else is greebles — bolt rows, hydraulic rams with polished
+rods, cooling shrouds, ammo feeds, radiator fins.
+
+Almost nothing on it is static, so the hierarchy is the model:
+
+```
+root ─ pelvis
+     ├ legs[2] ─ hip pivot ─ knee pivot ─ ankle pivot ─ foot
+     └ torso (twists about Y)
+           └ arms (elevate about X) ─ twin cannon assemblies
+```
+
+- **The walk cycle is driven by distance travelled, not by time**, so the legs always match the ground
+  whatever the speed does and the feet never skate. Each leg swings through the first half of its cycle
+  and pushes through the second; the ankle subtracts its parents' angles so the sole stays flat however
+  the leg is folded; the body dips once per footfall, and each plant kicks dust, thumps and shakes the
+  camera.
+- **The torso twist is limited** relative to the chassis, so anything behind you means turning the legs.
+- **Arm cannons** are hitscan and go through exactly the same raycast, impact and scoring path as a rifle
+  shot. They converge on whatever the camera is looking at rather than firing along the barrel axis —
+  the guns sit seven metres up and two metres out, so a barrel-axis shot would sail far over the
+  crosshair.
+- **Javelin salvo** on `Mouse 2`: six missiles out of the shoulder pods, each on the same ballistic path
+  and explosion handling as a tank shell.
+
 ### The vehicles
 
 `src/world/Vehicles.ts` builds three vehicles from primitives, each with its origin on the ground and its
@@ -282,7 +317,10 @@ src/
 │   ├── LevelBuilder.ts         Shared level scaffolding: box/prop/sign helpers, sky, dust, pedestals
 │   ├── ShootingRange.ts        The range: firing line, lanes, targets, props
 │   ├── RaceTrack.ts            The circuit: spline-driven track, pit lane, garage, gunnery range
+│   ├── ModelKit.ts             Modelling primitives shared by every hand-built machine
+│   ├── VehicleMaterials.ts     Cached materials for the vehicles
 │   ├── Vehicles.ts             Lofted hypercar / 4x4 / tank models
+│   ├── Thor.ts                 Walking Terran assault mech
 │   ├── Targets.ts              Reactive range targets and scoring
 │   ├── RangeSession.ts         Score, accuracy, timed drill
 │   ├── GeometryMerge.ts        Static batching so scenery density stays cheap

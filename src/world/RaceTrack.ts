@@ -1055,6 +1055,49 @@ export class RaceTrack extends LevelBuilder {
    * here would be exactly wrong.
    */
   private buildVehicles(): void {
+    // The Thor is nine metres tall and will not fit in a garage bay, so it gets
+    // a marked drop pad out on the apron.
+    const m = this.materials;
+    const padX = GARAGE_X1 + 34;
+    const padZ = PIT_LANE_Z - 4;
+    this.box(16, 0.1, 16, padX, 0.05, padZ, m.concreteDark, {
+      surface: 'concrete',
+      solid: false,
+      castShadow: false,
+    });
+    for (const side of [-1, 1]) {
+      this.prop(
+        new THREE.PlaneGeometry(0.35, 15),
+        m.paintedYellow,
+        [padX + side * 7, 0.11, padZ],
+        [-Math.PI / 2, 0, 0],
+        { surface: 'concrete', castShadow: false, shootable: false },
+      );
+      this.prop(
+        new THREE.PlaneGeometry(15, 0.35),
+        m.paintedYellow,
+        [padX, 0.11, padZ + side * 7],
+        [-Math.PI / 2, 0, 0],
+        { surface: 'concrete', castShadow: false, shootable: false },
+      );
+      this.box(0.5, 3.4, 0.5, padX + side * 8.4, 1.7, padZ - 8, m.metalDark, { surface: 'metal' });
+      this.box(0.8, 0.5, 0.6, padX + side * 8.4, 3.6, padZ - 8, m.emissiveOrange, {
+        surface: 'metal',
+        solid: false,
+        shootable: false,
+      });
+    }
+    this.sign('MECH BAY — THOR', undefined, padX, 0.12, padZ + 4, 8, 2, 0, {
+      background: '#12161b',
+      borderColor: '#f0b400',
+      tiltX: -Math.PI / 2,
+    });
+    this.vehicleSpawns.push({
+      id: 'thor',
+      position: new THREE.Vector3(padX, 0.1, padZ),
+      yaw: Math.PI,
+    });
+
     const z = (GARAGE_FRONT_Z + GARAGE_BACK_Z) / 2 + 1;
     for (let i = 0; i < BAYS.length; i++) {
       // Parked nose-out toward the pit lane, angled a few degrees so the row

@@ -23,6 +23,9 @@ import { VehicleSystem, type VehicleInstance } from '../vehicles/VehicleSystem';
 import { LapTimer } from '../vehicles/LapTimer';
 import type { VehicleConfig } from '../vehicles/VehicleConfigs';
 import { EffectsSystem } from '../fx/EffectsSystem';
+
+/** Footfall dust is kicked straight up. */
+const THOR_UP = new THREE.Vector3(0, 1, 0);
 import { AudioEngine, type ImpactMaterial } from '../audio/AudioEngine';
 import { HUD } from '../ui/HUD';
 import { Menu } from '../ui/Menu';
@@ -89,6 +92,8 @@ export class Game {
   private appliedQuality: QualityLevel | null = null;
   private lastWeaponId: WeaponId = 'pistol';
   private collisionDebug: THREE.Object3D | null = null;
+  /** Level geometry plus the vehicle group; rebuilt on every level load. */
+  private raycastTargets: THREE.Object3D[] = [];
   private interactTarget: 'ammo' | 'vehicle' | WeaponId | null = null;
   private interactVehicle: VehicleInstance | null = null;
   /** Sits in the driver's seat rather than on the boom. */
@@ -116,7 +121,18 @@ export class Game {
     this.vehicles = new VehicleSystem(this.collision, {
       getCollidables: () => this.level.collidables,
       onCannonFire: (position, config) => this.onCannonFire(position, config),
-      onShellImpact: (position, config) => this.onShellImpact(position, config),
+      onShellImpact: (position, payload) => this.onShellImpact(position, payload),
+      onMechCannon: (origin, direction, config) => this.onMechCannon(origin, direction, config),
+      onBarrage: (position) => {
+        this.audio.playCannon(position);
+        this.cameraController.addTrauma(0.4);
+        this.hud.logEvent('Javelin salvo away', 'good');
+      },
+      onFootfall: (position, hard) => {
+        this.audio.playVehicleImpact(position, clamp(hard * 0.55, 0.15, 0.6));
+        this.effects.spawnImpact(position, THOR_UP, 'dirt', 0.9 + hard);
+        this.cameraController.addTrauma(0.06 + hard * 0.06);
+      },
       onCollide: (instance, impact) => {
         this.audio.playVehicleImpact(instance.position, clamp(impact / 14, 0.2, 1));
         this.cameraController.addTrauma(clamp(impact / 24, 0.1, 0.7));
@@ -343,6 +359,7 @@ export class Game {
 
     this.vehicles.spawnAll(this.level.vehicles);
     this.lapTimer = this.level.lapCourse ? new LapTimer(this.level.lapCourse) : null;
+    this.raycastTargets = [...this.level.collidables, this.vehicles.group];
   }
 
   /**
@@ -587,6 +604,8 @@ export class Game {
       aimYaw: this.cameraController.aimYaw,
       aimPitch: this.cameraController.aimPitch,
       firePressed: this.input.wasMousePressed(MOUSE_LEFT),
+      fireHeld: this.input.isMouseDown(MOUSE_LEFT),
+      secondaryPressed: this.input.wasMousePressed(MOUSE_RIGHT),
     });
 
     // Carry the player with the vehicle so getting out lands somewhere sane
@@ -650,6 +669,10 @@ export class Game {
   }
 
   private gearLabel(vehicle: VehicleInstance): string {
+    if (vehicle.config.mech) {
+      if (vehicle.speed < -0.3) return 'REV';
+      return Math.abs(vehicle.speed) < 0.3 ? 'IDLE' : 'WALK';
+    }
     if (vehicle.speed < -0.4) return 'R';
     if (Math.abs(vehicle.speed) < 0.4) return 'N';
     const config = vehicle.config;
@@ -667,7 +690,11 @@ export class Game {
     this.audio.startEngine(vehicle.config.engine.timbre);
     this.audio.playUi('confirm');
     this.hud.logEvent(
-      `${vehicle.config.name} — W/S drive, A/D steer, Space brake${vehicle.config.cannon ? ', Mouse 1 fire' : ''}`,
+      vehicle.config.mech
+        ? `${vehicle.config.name} — W/S walk, A/D turn, Mouse 1 cannons, Mouse 2 Javelin salvo`
+        : `${vehicle.config.name} — W/S drive, A/D steer, Space brake${
+            vehicle.config.cannon ? ', Mouse 1 fire' : ''
+          }`,
       'good',
     );
   }
@@ -693,17 +720,72 @@ export class Game {
     this.effects.spawnMuzzleFlash(position, this.fireDirection, 2.6, 0xffc98a, 26);
   }
 
-  private onShellImpact(position: THREE.Vector3, config: VehicleConfig): void {
-    const cannon = config.cannon;
-    if (!cannon) return;
-    this.effects.spawnExplosion(position, cannon.blastRadius, 0);
+  private onShellImpact(
+    position: THREE.Vector3,
+    payload: { damage: number; blastRadius: number },
+  ): void {
+    this.effects.spawnExplosion(position, payload.blastRadius, 0);
     this.audio.playExplosion(position);
     this.applyBlastDamage(
-      { damage: cannon.damage, damageRadius: cannon.blastRadius } as ThrowableConfig,
+      { damage: payload.damage, damageRadius: payload.blastRadius } as ThrowableConfig,
       position,
     );
     const distance = this.player.eyePosition.distanceTo(position);
-    this.cameraController.addTrauma(clamp(1 - distance / (cannon.blastRadius * 3), 0, 0.8));
+    this.cameraController.addTrauma(clamp(1 - distance / (payload.blastRadius * 3), 0, 0.8));
+  }
+
+  /**
+   * A mech arm cannon round. Hitscan, and it goes through exactly the same
+   * raycast, impact and scoring path as a rifle shot — the only difference is
+   * where it comes from and how hard it hits.
+   */
+  private onMechCannon(
+    origin: THREE.Vector3,
+    barrelDirection: THREE.Vector3,
+    config: VehicleConfig,
+  ): void {
+    const spec = config.mech;
+    if (!spec) return;
+
+    // The guns sit seven metres up and two metres out from the camera, so
+    // firing along the barrel axis would send rounds far over the crosshair.
+    // Converge them on whatever the camera is looking at instead — the same
+    // trick the third-person weapon path uses to keep the crosshair honest.
+    const camera = this.cameraController.camera;
+    const self = this.vehicles.driving ? [this.vehicles.driving.root] : [];
+    this.cameraController.getAimDirection(this.fireDirection);
+    const aimHit = this.raycastWorld(camera.position, this.fireDirection, spec.cannon.range, self);
+    const aimDistance = aimHit ? Math.max(aimHit.distance, 12) : spec.cannon.range;
+    this.tmpAimPoint.copy(camera.position).addScaledVector(this.fireDirection, aimDistance);
+
+    const direction = this.tmpVec2.copy(this.tmpAimPoint).sub(origin).normalize();
+    const spread = (spec.cannon.spread * Math.PI) / 180;
+    direction.x += (Math.random() - 0.5) * spread;
+    direction.y += (Math.random() - 0.5) * spread;
+    direction.normalize();
+    void barrelDirection;
+
+    this.effects.spawnMuzzleFlash(origin, direction, 1.5, 0xffd6a0, 14);
+    this.audio.playVehicleImpact(origin, 0.55);
+    this.cameraController.addTrauma(0.05);
+
+    const hit = this.raycastWorld(origin, direction, spec.cannon.range, self);
+    const end = hit
+      ? hit.point
+      : this.tmpVec.copy(origin).addScaledVector(direction, spec.cannon.range).clone();
+    this.effects.spawnTracer(origin, end, 320, 0.05, 0xffd08a);
+    if (!hit) return;
+
+    this.effects.spawnImpact(hit.point, hit.normal, hit.surface, 1.4);
+    this.audio.playImpact(hit.surface, hit.point, 1.1);
+    const target = hit.object.userData.rangeTarget as RangeTarget | undefined;
+    if (!target) return;
+    this.cameraController.getAimDirection(this.hitCentre);
+    const result = target.registerHit(hit.point, 'body', this.hitCentre, spec.cannon.damage);
+    this.session.registerHit(target, result.score);
+    this.audio.playHitmarker(false);
+    this.hud.showHitmarker(false);
+    if (result.knockedDown) this.hud.logEvent(`${target.label} down`, 'good');
   }
 
   private handleDebugKeys(): void {
@@ -1054,6 +1136,22 @@ export class Game {
     this.audio.deafen(strength, config.flashDuration * strength);
   }
 
+  /**
+   * True when `object` or any of its ancestors is in `ignore`.
+   *
+   * Comparing only the leaf mesh is not enough now that vehicles are raycast
+   * targets: a mech would put its first round straight into its own arm.
+   */
+  private static isIgnored(object: THREE.Object3D, ignore: THREE.Object3D[]): boolean {
+    if (ignore.length === 0) return false;
+    let node: THREE.Object3D | null = object;
+    while (node) {
+      if (ignore.includes(node)) return true;
+      node = node.parent;
+    }
+    return false;
+  }
+
   private raycastWorld(
     origin: THREE.Vector3,
     direction: THREE.Vector3,
@@ -1063,10 +1161,13 @@ export class Game {
     this.raycaster.set(origin, direction);
     this.raycaster.near = 0;
     this.raycaster.far = maxDistance;
-    const hits = this.raycaster.intersectObjects(this.level.collidables, false);
+    // Vehicles are dynamic objects rather than baked level geometry, so they
+    // have to be tested separately or a parked car would be shot straight
+    // through. Recursive, because a vehicle is a hierarchy of joints.
+    const hits = this.raycaster.intersectObjects(this.raycastTargets, true);
 
     for (const hit of hits) {
-      if (ignore.includes(hit.object)) continue;
+      if (Game.isIgnored(hit.object, ignore)) continue;
       if (!hit.face) continue;
 
       const data = hit.object.userData;
@@ -1258,9 +1359,13 @@ export class Game {
           lapTime: LapTimer.format(lap?.current ?? null),
           lastLap: LapTimer.format(lap?.last ?? null),
           bestLap: LapTimer.format(lap?.best ?? null),
+          showLaps: lap !== null && !driving.config.mech,
+          reloadLabel: driving.config.mech ? 'MISSILES' : 'GUN',
           reload: driving.config.cannon
             ? clamp(1 - driving.reload / driving.config.cannon.reload, 0, 1)
-            : null,
+            : driving.config.mech
+              ? clamp(1 - driving.barrageCooldown / driving.config.mech.barrage.cooldown, 0, 1)
+              : null,
         }
       : null;
 

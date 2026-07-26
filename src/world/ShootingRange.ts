@@ -47,6 +47,8 @@ export class ShootingRange extends LevelBuilder {
       label: 'LOADOUT — PRESS 1-0 OR WALK UP',
     });
 
+    this.buildMechPad();
+
     const { sun, sky } = this.buildLighting();
     this.buildAtmospherics();
 
@@ -61,7 +63,7 @@ export class ShootingRange extends LevelBuilder {
       collidables: this.collidables,
       pickups: this.pickups,
       ammoCrates: this.ammoCrates,
-      vehicles: [],
+      vehicles: this.vehicleSpawns,
       lapCourse: null,
       spawnPoint: new THREE.Vector3(0, PAD_TOP + 0.02, 4),
       spawnYaw: 0,
@@ -775,6 +777,44 @@ export class ShootingRange extends LevelBuilder {
         { surface: 'metal', shootable: false },
       );
     }
+  }
+
+  /**
+   * A hardstand east of the covered bay for the Thor. It has to be outside the
+   * roof — the mech is nearly twice the height of the firing line.
+   */
+  private buildMechPad(): void {
+    const m = this.materials;
+    const x = 36;
+    const z = 4;
+    this.box(16, 0.14, 18, x, 0.07, z, m.concreteDark, {
+      surface: 'concrete',
+      solid: false,
+      castShadow: false,
+    });
+    for (const side of [-1, 1]) {
+      this.prop(
+        new THREE.PlaneGeometry(0.35, 17),
+        m.paintedYellow,
+        [x + side * 7, 0.15, z],
+        [-Math.PI / 2, 0, 0],
+        { surface: 'concrete', castShadow: false, shootable: false },
+      );
+      this.box(0.5, 3.6, 0.5, x + side * 8.5, 1.8, z + 8, m.metalDark, { surface: 'metal' });
+      this.box(0.8, 0.5, 0.6, x + side * 8.5, 3.8, z + 8, m.emissiveOrange, {
+        surface: 'metal',
+        solid: false,
+        shootable: false,
+      });
+    }
+    this.sign('MECH HARDSTAND', undefined, x, 0.16, z + 6, 8, 2, 0, {
+      background: '#12161b',
+      borderColor: '#f0b400',
+      tiltX: -Math.PI / 2,
+    });
+    // Yaw is measured from +Z, and downrange is -Z: half a turn puts the guns
+    // on the lanes the moment you climb in.
+    this.vehicleSpawns.push({ id: 'thor', position: new THREE.Vector3(x, 0.14, z), yaw: Math.PI });
   }
 
   // --------------------------------------------------------------- lighting

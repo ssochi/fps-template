@@ -61,7 +61,8 @@ const VEHICLE_CONTROLS: ControlEntry[] = [
   { keys: ['D'], action: 'Steer right' },
   { keys: ['Space'], action: 'Handbrake' },
   { keys: ['Mouse'], action: 'Look around — aims the tank turret' },
-  { keys: ['Mouse 1'], action: 'Fire the 120 mm gun (tank)' },
+  { keys: ['Mouse 1'], action: 'Fire the 120 mm gun (tank) / arm cannons (Thor)' },
+  { keys: ['Mouse 2'], action: 'Javelin missile salvo (Thor)' },
   { keys: ['V'], action: 'Chase / cockpit camera' },
 ];
 
@@ -126,7 +127,8 @@ export class Menu {
           <p class="subtitle">
             First / third person shooter sandbox — ten weapons, three throwables, and two maps:
             a full shooting range, and a race circuit whose garage holds a hypercar, a 4x4 and a tank —
-            all three drivable, with lap timing, and a working 120 mm gun on the tank.
+            all three drivable with lap timing and a working 120 mm gun on the tank — plus a pilotable
+            Terran assault mech that walks, twists its torso and fires twin arm cannons.
           </p>
 
           <h2>Controls</h2>

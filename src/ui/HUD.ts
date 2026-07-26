@@ -48,8 +48,12 @@ export interface HudFrame {
     lapTime: string;
     lastLap: string;
     bestLap: string;
-    /** Tank only: 0..1 reload progress, 1 = ready. */
+    /** Hidden on maps with no circuit. */
+    showLaps: boolean;
+    /** 0..1 reload progress, 1 = ready. Null when the vehicle is unarmed. */
     reload: number | null;
+    /** Label for the reload row — "GUN" on the tank, "MISSILES" on the mech. */
+    reloadLabel: string;
   } | null;
 }
 
@@ -93,7 +97,9 @@ export class HUD {
   private readonly vehLapEl: HTMLElement;
   private readonly vehTimeEl: HTMLElement;
   private readonly vehBestEl: HTMLElement;
+  private readonly vehLapRows: HTMLElement[] = [];
   private readonly vehReloadRow: HTMLElement;
+  private readonly vehReloadLabel: HTMLElement;
   private readonly vehReloadEl: HTMLElement;
   private readonly slotEls = new Map<WeaponId, HTMLElement>();
 
@@ -188,7 +194,11 @@ export class HUD {
     this.vehLapEl = this.q('#veh-lap');
     this.vehTimeEl = this.q('#veh-time');
     this.vehBestEl = this.q('#veh-best');
+    for (const row of this.root.querySelectorAll<HTMLElement>('#vehicle .veh-lap-row')) {
+      this.vehLapRows.push(row);
+    }
     this.vehReloadRow = this.q('#vehicle .veh-reload');
+    this.vehReloadLabel = this.q('#veh-reload-label');
     this.vehReloadEl = this.q('#veh-reload');
 
     this.buildLoadout();
@@ -259,10 +269,12 @@ export class HUD {
         <div class="veh-speed"><span id="veh-kph">0</span><span class="veh-unit">KM/H</span></div>
         <div class="veh-revs"><div id="veh-rev-fill"></div></div>
         <div class="veh-row"><span class="k">GEAR</span><span class="v" id="veh-gear">N</span></div>
-        <div class="veh-row"><span class="k">LAP</span><span class="v" id="veh-lap">0</span></div>
-        <div class="veh-row"><span class="k">TIME</span><span class="v" id="veh-time">—</span></div>
-        <div class="veh-row"><span class="k">BEST</span><span class="v accent" id="veh-best">—</span></div>
-        <div class="veh-row veh-reload hidden"><span class="k">GUN</span><span class="v" id="veh-reload">READY</span></div>
+        <div class="veh-row veh-lap-row"><span class="k">LAP</span><span class="v" id="veh-lap">0</span></div>
+        <div class="veh-row veh-lap-row"><span class="k">TIME</span><span class="v" id="veh-time">—</span></div>
+        <div class="veh-row veh-lap-row"><span class="k">BEST</span><span class="v accent" id="veh-best">—</span></div>
+        <div class="veh-row veh-reload hidden">
+          <span class="k" id="veh-reload-label">GUN</span><span class="v" id="veh-reload">READY</span>
+        </div>
       </div>
 
       <div id="drill-banner" class="panel hidden"></div>
@@ -501,12 +513,16 @@ export class HUD {
       this.lastGear = v.gear;
       this.vehGearEl.textContent = v.gear;
     }
-    this.vehLapEl.textContent = `${v.laps}`;
-    this.vehTimeEl.textContent = v.lapTime;
-    this.vehBestEl.textContent = v.bestLap;
+    for (const row of this.vehLapRows) row.classList.toggle('hidden', !v.showLaps);
+    if (v.showLaps) {
+      this.vehLapEl.textContent = `${v.laps}`;
+      this.vehTimeEl.textContent = v.lapTime;
+      this.vehBestEl.textContent = v.bestLap;
+    }
 
     this.vehReloadRow.classList.toggle('hidden', v.reload === null);
     if (v.reload !== null) {
+      this.vehReloadLabel.textContent = v.reloadLabel;
       const ready = v.reload >= 1;
       this.vehReloadEl.textContent = ready ? 'READY' : `${Math.round(v.reload * 100)}%`;
       this.vehReloadEl.classList.toggle('accent', ready);
