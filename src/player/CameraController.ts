@@ -219,7 +219,8 @@ export class CameraController {
     dt: number,
     frame: {
       position: THREE.Vector3;
-      yaw: number;
+      /** Yaw of the *model*, used to place the model-space pivot and eye. */
+      modelYaw: number;
       pivot: THREE.Vector3;
       eye: THREE.Vector3;
       speed: number;
@@ -253,8 +254,8 @@ export class CameraController {
     const shakeYaw = noise1D(this.shakeTime, 2) * shake * 1.6 * DEG2RAD;
     const shakeRoll = noise1D(this.shakeTime, 3) * shake * 2.4 * DEG2RAD;
 
-    const cos = Math.cos(frame.yaw);
-    const sin = Math.sin(frame.yaw);
+    const cos = Math.cos(frame.modelYaw);
+    const sin = Math.sin(frame.modelYaw);
     const local = (v: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 =>
       out.set(v.x * cos + v.z * sin, v.y, -v.x * sin + v.z * cos).add(frame.position);
 

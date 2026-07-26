@@ -812,9 +812,8 @@ export class ShootingRange extends LevelBuilder {
       borderColor: '#f0b400',
       tiltX: -Math.PI / 2,
     });
-    // Yaw is measured from +Z, and downrange is -Z: half a turn puts the guns
-    // on the lanes the moment you climb in.
-    this.vehicleSpawns.push({ id: 'thor', position: new THREE.Vector3(x, 0.14, z), yaw: Math.PI });
+    // Heading yaw 0 already faces -Z, which is downrange.
+    this.vehicleSpawns.push({ id: 'thor', position: new THREE.Vector3(x, 0.14, z), yaw: 0 });
   }
 
   // --------------------------------------------------------------- lighting

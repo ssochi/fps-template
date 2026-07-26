@@ -1092,6 +1092,7 @@ export class RaceTrack extends LevelBuilder {
       borderColor: '#f0b400',
       tiltX: -Math.PI / 2,
     });
+    // Heading yaw 0 faces -Z, so half a turn looks out over the pit lane.
     this.vehicleSpawns.push({
       id: 'thor',
       position: new THREE.Vector3(padX, 0.1, padZ),
@@ -1105,7 +1106,8 @@ export class RaceTrack extends LevelBuilder {
       this.vehicleSpawns.push({
         id: BAYS[i].id,
         position: new THREE.Vector3(BAYS[i].x, FLOOR_Y, z),
-        yaw: (i - 1) * 0.06,
+        // Nose-out is +Z, and heading yaw 0 faces -Z.
+        yaw: Math.PI + (i - 1) * 0.06,
       });
     }
   }

@@ -619,7 +619,9 @@ export class Game {
     const wide = config.tracked ? 0 : 10;
     this.cameraController.updateVehicle(dt, {
       position: vehicle.position,
-      yaw: vehicle.yaw,
+      // The pivot and eye are model-space offsets, so they turn with the model,
+      // which sits half a turn off the heading yaw.
+      modelYaw: vehicle.yaw + Math.PI,
       pivot: vehicle.cameraPivot,
       eye: vehicle.driverEye,
       speed: vehicle.speed,

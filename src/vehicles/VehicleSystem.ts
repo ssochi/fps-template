@@ -27,6 +27,23 @@ import { clamp, damp } from '../core/MathUtils';
  * driven has its collider emptied, because it must not collide with itself.
  */
 
+/**
+ * Models are built nose-`+Z`, but heading yaw follows the *player's* look
+ * convention, where yaw 0 faces `-Z` (see `CameraController.getAimDirection`).
+ * The two are therefore always half a turn apart.
+ *
+ * Sharing the player's convention is what lets a turret be driven straight from
+ * `aimYaw` with no offset — the earlier mismatch pointed every turret, torso and
+ * chase camera exactly backwards. `MODEL_YAW_OFFSET` is applied in the one place
+ * that writes a model transform, and nowhere else.
+ */
+const MODEL_YAW_OFFSET = Math.PI;
+
+/** World-space forward for a heading yaw. */
+function forwardFromYaw(yaw: number, out: THREE.Vector3): THREE.Vector3 {
+  return out.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+}
+
 const GRAVITY = 22;
 const SHELL_GRAVITY = 9.81;
 const SHELL_LIFE = 8;
@@ -179,7 +196,7 @@ export class VehicleSystem {
 
     built.root.rotation.order = 'YXZ';
     built.root.position.copy(spawn.position);
-    built.root.rotation.y = spawn.yaw;
+    built.root.rotation.y = spawn.yaw + MODEL_YAW_OFFSET;
     this.group.add(built.root);
 
     const instance: VehicleInstance = {
@@ -287,9 +304,10 @@ export class VehicleSystem {
     this.syncCollider(instance);
     this.driving = null;
 
+    // `exitOffset` is a model-space offset, so it turns with the model.
     const offset = instance.exitOffset
       .clone()
-      .applyAxisAngle(new THREE.Vector3(0, 1, 0), instance.yaw);
+      .applyAxisAngle(new THREE.Vector3(0, 1, 0), instance.yaw + MODEL_YAW_OFFSET);
     const spot = instance.position.clone().add(offset);
     spot.y += 0.2;
     return spot;
@@ -348,7 +366,7 @@ export class VehicleSystem {
     v.yaw += yawRate * dt;
 
     // --- integrate ---------------------------------------------------------
-    const forward = this.tmpVec.set(Math.sin(v.yaw), 0, Math.cos(v.yaw));
+    const forward = forwardFromYaw(v.yaw, this.tmpVec);
     v.verticalVelocity -= GRAVITY * dt;
 
     const centre = this.tmpVec2.copy(v.position);
@@ -450,7 +468,7 @@ export class VehicleSystem {
   private applyTransform(v: VehicleInstance): void {
     v.root.position.copy(v.position);
     v.root.position.y += v.bobOffset;
-    v.root.rotation.set(v.bodyPitch, v.yaw, v.bodyRoll);
+    v.root.rotation.set(v.bodyPitch, v.yaw + MODEL_YAW_OFFSET, v.bodyRoll);
 
     if (!v.occupied) this.syncCollider(v);
 
@@ -519,11 +537,10 @@ export class VehicleSystem {
       // A foot plants as its swing half ends.
       const planted = p >= 0.5;
       if (planted && !v.legPlanted[i] && moving > 0.05) {
-        this.tmpVec.set(
-          v.position.x + Math.sin(v.yaw + (i === 0 ? 0.35 : -0.35)) * 1.5,
-          v.position.y,
-          v.position.z + Math.cos(v.yaw + (i === 0 ? 0.35 : -0.35)) * 1.5,
-        );
+        // Offset to roughly where that foot is: forward, and out to its side.
+        forwardFromYaw(v.yaw + (i === 0 ? 0.35 : -0.35), this.tmpVec)
+          .multiplyScalar(1.5)
+          .add(v.position);
         this.hooks.onFootfall(this.tmpVec.clone(), moving);
       }
       v.legPlanted[i] = planted;
@@ -601,7 +618,7 @@ export class VehicleSystem {
 
     v.reload = cannon.reload;
     // Recoil shoves the hull back along the barrel.
-    v.speed -= cannon.recoil * Math.max(0, direction.dot(new THREE.Vector3(Math.sin(v.yaw), 0, Math.cos(v.yaw))));
+    v.speed -= cannon.recoil * Math.max(0, direction.dot(forwardFromYaw(v.yaw, this.tmpVec2)));
     this.hooks.onCannonFire(origin, v.config);
   }
 
