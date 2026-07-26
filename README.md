@@ -2,10 +2,11 @@
 
 A complete, batteries-included first/third person shooter template built with **Three.js + TypeScript + Vite**.
 
-It ships with a full shooting range, **ten distinct weapons**, **frag / smoke / flash grenades**, first
-*and* third person cameras, procedural weapon models, procedural character animation with IK, a pooled
-effects system, and a synthesized audio engine — **with zero binary assets**. Everything (textures,
-models, sounds) is generated at runtime, so the repo clones and runs instantly and works offline.
+It ships with **two maps** — a full shooting range and a race circuit whose garage holds three heavily
+detailed vehicles — plus **ten distinct weapons**, **frag / smoke / flash grenades**, first *and* third
+person cameras, procedural weapon models, procedural character animation with IK, a pooled effects
+system, and a synthesized audio engine — **with zero binary assets**. Everything (textures, models,
+sounds) is generated at runtime, so the repo clones and runs instantly and works offline.
 
 > 中文文档见 [README.zh-CN.md](README.zh-CN.md)
 
@@ -52,6 +53,7 @@ Requires Node 20.19+ / 22.12+.
 | `E` | Interact — resupply ammo and grenades, take a weapon from a pedestal |
 | `K` | Start / cancel the timed drill |
 | `L` | Reset all targets |
+| `M` | Next map (also selectable from the start and pause screens) |
 | `H` | Toggle HUD |
 | `P` | Toggle collision debug wireframes |
 | `Esc` | Pause / settings |
@@ -132,7 +134,14 @@ target rings, shell drops, hitmarkers and UI blips. Sounds are positioned with m
 attenuation, stereo panning and distance-based air absorption, with a voice budget so full-auto fire can
 never melt the audio graph.
 
-### The range
+### The maps
+
+Both maps are subclasses of `LevelBuilder`, share the same helpers (`box`, `prop`, `sign`,
+`pedestalRow`, `buildDustField`, `buildSkyAndSun`) and are hot-swappable at runtime with `M` or from the
+menu. Swapping tears down the collision world, the score session and every level-owned GPU resource, then
+rebuilds — the player, weapons and HUD simply re-point.
+
+### The shooting range
 - Five lanes: close-quarters steel, a pistol/SMG progression with a penetration demo, a centre precision
   lane with a clear alley to a 100 m gong, a moving-target lane, and a long-range lane out to 150 m.
 - Six target types: paper bullseyes with 10-ring scoring, humanoid silhouettes that absorb damage and
@@ -140,6 +149,47 @@ never melt the audio graph.
   poppers, rail-mounted movers, and long-range gongs.
 - Ten weapon pedestals, an ammo resupply crate, distance markers, cover props and a covered firing line.
 - Scoring, live accuracy, and a timed drill (`K`) with a persisted personal best.
+
+### The circuit
+
+- A closed race track generated from a single spline. Sampling it once and offsetting the samples
+  sideways produces every ribbon the map needs: asphalt, white edge lines, gravel run-off, armco rails
+  and catch fencing — so the layout is defined in exactly one place.
+- Kerbing is laid **only where the circuit is actually turning**, on the inside of every corner and both
+  sides of the tight ones; tyre walls stack up on the outside of the fastest corners.
+- Start/finish chequer, staggered grid boxes, a start gantry with a five-light sequence that runs on a
+  loop, braking boards, marshal posts, sponsor hoardings, a 12-row grandstand and a timing tower.
+- A pit lane with a chequered pit wall, timing stands, marked pit boxes, tyre sets, fuel rigs and wheel
+  guns; behind it a paddock of transporters and freight containers, and floodlight masts.
+- A three-bay garage holding the vehicles, with workbenches, tool chests, pegboards, tyre racks, trolley
+  jacks, axle stands, drums, hose reels and the weapon pedestals along the back wall.
+- A service-road gunnery range east of the pits — benches, five lanes, distance markers and a stop butt —
+  so the scoring, drills and every weapon still have somewhere to work.
+
+### The vehicles
+
+`src/world/Vehicles.ts` builds three vehicles from primitives, each with its origin on the ground and its
+nose pointing `+Z`. Bodies are **lofted** rather than boxed: `loft()` skins a list of rectangular
+cross-sections, which is what lets a wedge-shaped hypercar nose, a boxy jeep tub and a sloped tank glacis
+all come out of the same sixty lines. Roll cages, bull bars and tow cables are swept tubes.
+
+- **Hypercar** — lofted wedge body with a separate glass canopy, carbon floor, splitter, dive planes,
+  side skirts and a five-strake diffuser; swan-neck rear wing; quad exhausts; a full-width light bar;
+  exposed engine bay under slatted louvres; door livery; mirrors on slim stalks; arch lips; and
+  five-twin-spoke wheels with carbon discs and calipers.
+- **4x4** — separate chassis rails, live axles, leaf springs and dampers; seven-slot grille with round
+  lamps in chrome bezels; bull bar with a winch; a swept-tube roll cage with a canvas roof and a light
+  bar; snorkel; jerry cans, shovel and axe; spare wheel on a swing-out carrier; rock sliders and fender
+  flares; a modelled interior with seats, dash, instruments and a steering wheel; and chunky staggered
+  tread blocks on steel wheels.
+- **Main battle tank** — sloped-glacis hull with sponsons and six hinged skirt plates a side; drive
+  sprocket with teeth, idler, seven doubled road wheels on swing arms, three return rollers, and a
+  **closed band of ~120 track links** generated along the running-gear path; faceted turret with mantlet,
+  thermal sleeve, fume extractor and muzzle brake, commander's cupola with vision blocks and a pintle MG,
+  smoke-grenade launchers, a rear stowage basket, tow cables, spare track links and antennas.
+
+Vehicles never animate, so each is baked into the level's static batch — one draw call per material
+instead of one per bolt — while still registering collision boxes and staying shootable.
 
 ### Scene and lighting
 No ray tracing — everything is conventional forward rendering, tuned so the space reads as a real place:
@@ -195,7 +245,10 @@ src/
 ├── audio/
 │   └── AudioEngine.ts          Fully procedural WebAudio sound
 ├── world/
-│   ├── ShootingRange.ts        Level construction, lighting, collision registration
+│   ├── LevelBuilder.ts         Shared level scaffolding: box/prop/sign helpers, sky, dust, pedestals
+│   ├── ShootingRange.ts        The range: firing line, lanes, targets, props
+│   ├── RaceTrack.ts            The circuit: spline-driven track, pit lane, garage, gunnery range
+│   ├── Vehicles.ts             Lofted hypercar / 4x4 / tank models
 │   ├── Targets.ts              Reactive range targets and scoring
 │   ├── RangeSession.ts         Score, accuracy, timed drill
 │   ├── GeometryMerge.ts        Static batching so scenery density stays cheap
@@ -242,12 +295,31 @@ joints.
 writing a `buildX()` method, tagging its meshes with `tag(mesh, zone, surface)` and adding a case to
 `registerHit()` / `update()`.
 
-### Change the level
+### Change or add a level
 
-Everything is built in `src/world/ShootingRange.ts`. The `box()` helper adds a mesh, registers a
-collision AABB and adds it to the shooting raycast list in one call, so new geometry is fully wired up by
-construction. Surfaces are tagged with `userData.surface`, which drives impact FX, impact audio and
-footstep sounds.
+Levels subclass `LevelBuilder` (`src/world/LevelBuilder.ts`) and implement `build(): LevelBuildResult`.
+The `box()` helper adds a mesh, registers a collision AABB and adds it to the shooting raycast list in
+one call, so new geometry is fully wired up by construction. Surfaces are tagged with
+`userData.surface`, which drives impact FX, impact audio and footstep sounds.
+
+To add a map: add an id to `LevelId` and an entry to `LEVELS`, write the builder, and add a case to
+`Game.buildLevel()`. Everything else — the menu picker, the `M` key, teardown and rebuild — follows from
+`LEVELS`.
+
+Two things worth knowing before you build a large outdoor level:
+
+- **Batch aggressively.** Queue static geometry through `box`/`prop`/`propObject` and call `flushBatch()`
+  at the end of `build()`. The circuit is ~800 primitives and lands at roughly 550 draw calls including
+  everything else on screen.
+- **Watch the collider count, not the triangle count.** Collision is AABB-only and linear, so a long
+  diagonal wall must not become one hugely inflated box. `RaceTrack.barrierColliders()` shows the
+  approach: walk the polyline and emit one collider per run of near-constant heading.
+
+### Add a vehicle
+
+Add an id to `VehicleId` in `src/world/Vehicles.ts` and a builder returning `{ root, colliders, size }`.
+Build it nose-`+Z` with the origin on the ground; `loft()`, `tube()`, `axle()`, `bothSides()` and
+`buildWheel()` cover most of what a vehicle needs.
 
 ### Tune the feel
 
@@ -285,11 +357,29 @@ raycasting means a round entering a solid box never registers a second hit on th
 is unaffected. Target furniture and the pedestal display weapons go through the same path. Without it the
 prop density above would cost well over two thousand draw calls.
 
-**Performance.** ~550-700 draw calls and ~190k triangles with the whole bay on screen, comfortable on any
-discrete GPU or modern integrated one. Lighting is deliberately restrained — a forward renderer pays for
-every light on every lit pixel, so the bay is lit by four strong lamps rather than one per fixture. If you
-need more headroom, drop the quality preset: it disables bloom, SMAA, shadows, the second lamp bank and
-the atmospherics, and halves particle counts.
+**Depth precision.** `EffectComposer`'s default render target allocates a *16-bit* depth renderbuffer,
+which across a 2000 m far plane is not enough to keep a track ribbon, its run-off and the terrain apart —
+they z-fight within tens of metres. The composer is therefore given a target with `stencilBuffer: true`,
+which gets a `DEPTH24_STENCIL8` attachment instead. Worth knowing before you author any large, flat,
+layered outdoor geometry.
+
+**Sky and bloom.** `Sky` writes physical radiance, comfortably above 1.0 across the whole upper half of
+the screen. Tone mapping copes, but bloom runs *before* it, so an unmodified sky dome hands the bloom pass
+a full-screen over-bright source and the result is a milky veil over everything. `LevelBuilder` splices a
+Reinhard roll-off into the sky shader whose asymptote sits below the bloom threshold: the gradient
+survives, no sky pixel ever reaches the high-pass, and muzzle flashes and emissives are untouched.
+
+**Sun placement.** A directional light's direction is `position - target`, so anchoring the sun at a fixed
+world offset while its shadow target sits a hundred metres away silently flattens the sun elevation.
+`buildSkyAndSun` places the sun *relative to its target*, which is why a level can ask for a 46 degree sun
+and get one.
+
+**Performance.** ~550-700 draw calls and ~190k triangles on the range; ~700-900 and ~600k on the circuit
+with the pit complex, all three vehicles and half the track in frame. Comfortable on any discrete GPU or a
+modern integrated one. Lighting is deliberately restrained — a forward renderer pays for every light on
+every lit pixel, so the range bay is lit by four strong lamps rather than one per fixture, and the garage
+by two per bay. If you need more headroom, drop the quality preset: it disables bloom, SMAA, shadows, the
+second lamp bank, the floodlights and the atmospherics, and halves particle counts.
 
 ---
 

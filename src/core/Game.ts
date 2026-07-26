@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { Input, MOUSE_LEFT, MOUSE_RIGHT } from './Input';
 import { Settings, type QualityLevel } from './Settings';
-import { RenderPipeline } from './RenderPipeline';
+import { RenderPipeline, QUALITY_PRESETS } from './RenderPipeline';
 import { clamp } from './MathUtils';
 import { CollisionWorld } from '../physics/CollisionWorld';
-import { ShootingRange, type RangeBuildResult } from '../world/ShootingRange';
+import { ShootingRange } from '../world/ShootingRange';
+import { RaceTrack } from '../world/RaceTrack';
+import { LEVELS, mergeDisplayModel, type LevelBuildResult, type LevelId } from '../world/LevelBuilder';
 import { RangeSession } from '../world/RangeSession';
 import type { RangeTarget, TargetEvent } from '../world/Targets';
 import { Player, type PlayerInputState } from '../player/Player';
@@ -37,8 +39,6 @@ const SLOT_KEYS = [
   'Digit9',
   'Digit0',
 ];
-const AMMO_CRATE_POSITION = new THREE.Vector3(-20, 0, 10.5);
-const AMMO_CRATE_RADIUS = 3.5;
 
 /**
  * Wires every subsystem together and owns the frame loop.
@@ -55,8 +55,8 @@ export class Game {
 
   private readonly scene = new THREE.Scene();
   private readonly collision = new CollisionWorld();
-  private readonly range: RangeBuildResult;
-  private readonly session: RangeSession;
+  private level!: LevelBuildResult;
+  private session!: RangeSession;
 
   private readonly player: Player;
   private readonly cameraController: CameraController;
@@ -102,18 +102,11 @@ export class Game {
   constructor(container: HTMLElement, hudRoot: HTMLElement, menuRoot: HTMLElement) {
     this.container = container;
 
-    this.scene.background = new THREE.Color(0x8fb4d8);
-    this.scene.fog = new THREE.Fog(0xa9c4dd, 130, 760);
-
     // --- world -----------------------------------------------------------
-    this.range = new ShootingRange(this.collision).build();
-    this.scene.add(this.range.root);
+    // `buildLevel` fills in `level` and `session`; the definite-assignment
+    // assertions on those fields exist because it runs here rather than inline.
+    this.buildLevel(this.settings.get('level'));
     this.scene.add(this.effects.group);
-    this.session = new RangeSession(this.range.targets);
-    for (const target of this.range.targets) {
-      target.onStateChange = (t, event) => this.onTargetStateChange(t, event);
-    }
-    this.populatePedestals();
 
     // --- player ----------------------------------------------------------
     const aspect = window.innerWidth / window.innerHeight;
@@ -132,10 +125,10 @@ export class Game {
       },
       onDeath: () => this.onPlayerDeath(),
     });
-    this.player.teleport(this.range.spawnPoint, this.range.spawnYaw);
+    this.player.teleport(this.level.spawnPoint, this.level.spawnYaw);
 
     this.cameraController = new CameraController(aspect, this.settings.get('fov'));
-    this.cameraController.collidables = this.range.collidables;
+    this.cameraController.collidables = this.level.collidables;
 
     this.viewModel = new ViewModel(aspect);
     this.character = new CharacterModel();
@@ -147,6 +140,7 @@ export class Game {
       onStart: () => this.startPlaying(),
       onResume: () => this.startPlaying(),
       onRespawn: () => this.respawn(),
+      onLevelChosen: (id) => this.loadLevel(id),
       onResetRange: () => {
         this.session.resetAll();
         this.effects.clear();
@@ -239,12 +233,8 @@ export class Game {
       this.effects.particleScale = preset.particleScale;
       this.effects.dynamicMuzzleLight = preset.dynamicMuzzleLight;
       this.effects.setPixelRatio(Math.min(window.devicePixelRatio, preset.pixelRatio));
-      this.range.sun.castShadow = preset.shadows;
-      this.range.sun.shadow.mapSize.setScalar(preset.shadowMapSize);
-      this.range.sun.shadow.map?.dispose();
-      this.range.sun.shadow.map = null;
-      for (const light of this.range.optionalLights) light.visible = preset.optionalLights;
-      for (const object of this.range.atmospherics) object.visible = preset.atmospherics;
+      void preset;
+      this.applyLevelQuality();
     };
 
     this.input = new Input(this.pipeline.canvas);
@@ -302,7 +292,7 @@ export class Game {
   }
 
   private respawn(): void {
-    this.player.respawn(this.range.spawnPoint, this.range.spawnYaw);
+    this.player.respawn(this.level.spawnPoint, this.level.spawnYaw);
     this.cameraController.reset();
     this.character.reset();
     this.weapons.refillAll();
@@ -312,8 +302,74 @@ export class Game {
     this.startPlaying();
   }
 
+  // ------------------------------------------------------------------ levels
+
+  /** Builds a level and wires everything that points at level content. */
+  private buildLevel(id: LevelId): void {
+    const builder = id === 'circuit' ? new RaceTrack(this.collision) : new ShootingRange(this.collision);
+    this.level = builder.build();
+    this.scene.add(this.level.root);
+    this.scene.background = this.level.background;
+    this.scene.fog = this.level.fog;
+
+    this.session = new RangeSession(this.level.targets);
+    for (const target of this.level.targets) {
+      target.onStateChange = (t, event) => this.onTargetStateChange(t, event);
+    }
+    this.populatePedestals();
+  }
+
+  /**
+   * Swaps maps at runtime. The collision world, session and all level-owned
+   * GPU resources belong to the level, so they are torn down and rebuilt
+   * together; everything else (player, weapons, HUD) simply re-points.
+   */
+  loadLevel(id: LevelId): void {
+    if (this.level && this.level.id === id) {
+      this.menu.markActiveLevel(id);
+      return;
+    }
+
+    if (this.collisionDebug) {
+      this.scene.remove(this.collisionDebug);
+      this.collisionDebug = null;
+    }
+    this.scene.remove(this.level.root);
+    this.level.dispose();
+    this.collision.clear();
+    this.effects.clear();
+    this.throwables.clear();
+
+    this.buildLevel(id);
+    this.settings.set('level', id);
+    this.menu.markActiveLevel(id);
+
+    this.cameraController.collidables = this.level.collidables;
+    this.player.respawn(this.level.spawnPoint, this.level.spawnYaw);
+    this.cameraController.reset();
+    this.character.reset();
+    this.weapons.refillAll();
+    this.throwables.refill();
+    this.hud.clearTransient();
+
+    // The sun and the optional lights are new objects, so the quality preset
+    // has to be pushed at them again.
+    this.applyLevelQuality();
+    this.hud.logEvent(`Map: ${this.level.name}`, 'good');
+  }
+
+  private applyLevelQuality(): void {
+    const preset = QUALITY_PRESETS[this.settings.get('quality')];
+    this.level.sun.castShadow = preset.shadows;
+    this.level.sun.shadow.mapSize.setScalar(preset.shadowMapSize);
+    this.level.sun.shadow.map?.dispose();
+    this.level.sun.shadow.map = null;
+    for (const light of this.level.optionalLights) light.visible = preset.optionalLights;
+    for (const object of this.level.atmospherics) object.visible = preset.atmospherics;
+  }
+
   private populatePedestals(): void {
-    for (const pickup of this.range.pickups) {
+    for (const pickup of this.level.pickups) {
       const model = buildWeaponModel(pickup.id);
       // Scale each gun so they read at a similar size on their pedestal.
       const scale = clamp(1.05 / Math.max(0.3, model.length), 0.85, 1.9);
@@ -321,7 +377,7 @@ export class Game {
       model.root.rotation.set(0, 0, 0.35);
       // Display models never animate, so flatten them to one mesh per material
       // instead of paying ~50 draw calls per pedestal.
-      pickup.display.add(ShootingRange.mergeDisplay(model.root, `display-${pickup.id}`));
+      pickup.display.add(mergeDisplayModel(model.root, `display-${pickup.id}`));
     }
   }
 
@@ -370,8 +426,8 @@ export class Game {
     } else {
       // Keep transient visuals alive behind the menus.
       this.effects.update(dt, this.cameraController.camera);
-      this.range.update(dt);
-      for (const target of this.range.targets) target.update(dt);
+      this.level.update(dt);
+      for (const target of this.level.targets) target.update(dt);
       this.handleMenuInput();
     }
 
@@ -403,9 +459,9 @@ export class Game {
   }
 
   private spinPedestals(dt: number): void {
-    for (const pickup of this.range.pickups) {
+    for (const pickup of this.level.pickups) {
       pickup.display.rotation.y += dt * 0.6;
-      pickup.display.position.y = 1.55 + Math.sin(performance.now() * 0.0016) * 0.04;
+      pickup.display.position.y = pickup.position.y + 1.55 + Math.sin(performance.now() * 0.0016) * 0.04;
     }
   }
 
@@ -449,8 +505,8 @@ export class Game {
     this.updateCharacter(dt);
     this.updateInteractions();
 
-    this.range.update(dt);
-    for (const target of this.range.targets) target.update(dt);
+    this.level.update(dt);
+    for (const target of this.level.targets) target.update(dt);
     const drill = this.session.update(dt);
     if (drill.justFinished) {
       this.audio.playRangeEvent('end');
@@ -485,6 +541,11 @@ export class Game {
       this.session.resetTargets();
       this.audio.playRangeEvent('targetUp');
       this.hud.logEvent('Targets reset', 'good');
+    }
+    if (this.input.wasPressed('KeyM')) {
+      const index = LEVELS.findIndex((l) => l.id === this.level.id);
+      this.loadLevel(LEVELS[(index + 1) % LEVELS.length].id);
+      return;
     }
     if (this.input.wasPressed('KeyK')) {
       if (this.session.drillState === 'idle' || this.session.drillState === 'finished') {
@@ -652,15 +713,18 @@ export class Game {
     this.interactTarget = null;
     let closest = Infinity;
 
-    for (const pickup of this.range.pickups) {
+    for (const pickup of this.level.pickups) {
       const d = this.player.position.distanceTo(pickup.position);
       if (d < pickup.radius && d < closest) {
         closest = d;
         this.interactTarget = pickup.id;
       }
     }
-    if (this.player.position.distanceTo(AMMO_CRATE_POSITION) < AMMO_CRATE_RADIUS) {
-      this.interactTarget = 'ammo';
+    for (const crate of this.level.ammoCrates) {
+      if (this.player.position.distanceTo(crate.position) < crate.radius) {
+        this.interactTarget = 'ammo';
+        break;
+      }
     }
 
     if (this.interactTarget && this.input.wasPressed('KeyE')) {
@@ -751,7 +815,7 @@ export class Game {
 
   private applyBlastDamage(config: ThrowableConfig, position: THREE.Vector3): void {
     // Targets in range take falloff damage, but only with line of sight.
-    for (const target of this.range.targets) {
+    for (const target of this.level.targets) {
       target.getCentre(this.tmpVec2);
       const distance = this.tmpVec2.distanceTo(position);
       if (distance > config.damageRadius) continue;
@@ -801,7 +865,7 @@ export class Game {
     this.raycaster.set(origin, direction);
     this.raycaster.near = 0;
     this.raycaster.far = maxDistance;
-    const hits = this.raycaster.intersectObjects(this.range.collidables, false);
+    const hits = this.raycaster.intersectObjects(this.level.collidables, false);
 
     for (const hit of hits) {
       if (ignore.includes(hit.object)) continue;

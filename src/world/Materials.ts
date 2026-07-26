@@ -685,6 +685,28 @@ export interface WorldMaterials {
   chainLink: THREE.MeshStandardMaterial;
   lampLens: THREE.MeshStandardMaterial;
   dirtBerm: THREE.MeshStandardMaterial;
+  /** Track surface: dark, matte, tiled tightly so the seams disappear. */
+  asphalt: THREE.MeshStandardMaterial;
+  /** Track markings, pit boxes, grid slots. */
+  whitePaint: THREE.MeshStandardMaterial;
+  /** Armco, catch-fence posts, polished trim. */
+  chrome: THREE.MeshStandardMaterial;
+  /** Run-off gravel traps. */
+  gravel: THREE.MeshStandardMaterial;
+}
+
+/**
+ * A tiny escape hatch for callers that need a one-off procedural texture
+ * without reimplementing the canvas plumbing (vehicle liveries, camo, treads).
+ */
+export function createCanvasTexture(
+  size: number,
+  draw: (ctx: CanvasRenderingContext2D, size: number) => void,
+  options: { repeat?: number; srgb?: boolean } = {},
+): THREE.CanvasTexture {
+  const { canvas, ctx } = createCanvas(size);
+  draw(ctx, size);
+  return finish(canvas, options.repeat ?? 1, options.srgb ?? true);
 }
 
 /** Yellow/black hazard stripes for range boundaries. */
@@ -726,10 +748,25 @@ export function createWorldMaterials(): WorldMaterials {
   const metalTex = buildMetalPanel(512, 0x9aa2ab, 41);
   const metalDarkTex = buildMetalPanel(512, 0x4d545c, 71);
   const woodTex = buildWood(512, 13);
-  const grassTex = buildConcrete(512, 0x5c6b45, 0.6, 91);
+  // Sunlit turf. ACES tone mapping crushes midtones hard, so the albedo has to
+  // sit well above what a colour picker would suggest or a daylit field reads
+  // as near-black.
+  const grassTex = buildConcrete(512, 0x8a9a5c, 0.55, 91);
   grassTex.map.repeat.set(40, 40);
   grassTex.normalMap.repeat.set(40, 40);
   grassTex.roughnessMap.repeat.set(40, 40);
+
+  // Asphalt tiles far more often than concrete — a 12 m wide ribbon reads as
+  // aggregate rather than a smear only if the grain stays small.
+  const asphaltTex = buildConcrete(512, 0x4b4d53, 0.34, 137);
+  asphaltTex.map.repeat.set(6, 6);
+  asphaltTex.normalMap.repeat.set(6, 6);
+  asphaltTex.roughnessMap.repeat.set(6, 6);
+
+  const gravelTex = buildConcrete(512, 0x9c9382, 0.75, 211);
+  gravelTex.map.repeat.set(14, 14);
+  gravelTex.normalMap.repeat.set(14, 14);
+  gravelTex.roughnessMap.repeat.set(14, 14);
 
   cachedMaterials = {
     floor: new THREE.MeshStandardMaterial({
@@ -835,6 +872,23 @@ export function createWorldMaterials(): WorldMaterials {
       roughness: 0.4,
     }),
     dirtBerm: new THREE.MeshStandardMaterial({ color: 0x6a5c46, roughness: 1.0, metalness: 0.0 }),
+    asphalt: new THREE.MeshStandardMaterial({
+      map: asphaltTex.map,
+      normalMap: asphaltTex.normalMap,
+      roughnessMap: asphaltTex.roughnessMap,
+      roughness: 0.97,
+      metalness: 0.0,
+      normalScale: new THREE.Vector2(0.45, 0.45),
+    }),
+    whitePaint: new THREE.MeshStandardMaterial({ color: 0xe8e8e4, roughness: 0.72, metalness: 0.02 }),
+    chrome: new THREE.MeshStandardMaterial({ color: 0xb9c2cc, roughness: 0.24, metalness: 1.0 }),
+    gravel: new THREE.MeshStandardMaterial({
+      map: gravelTex.map,
+      normalMap: gravelTex.normalMap,
+      roughnessMap: gravelTex.roughnessMap,
+      roughness: 1.0,
+      metalness: 0.0,
+    }),
   };
 
   return cachedMaterials;

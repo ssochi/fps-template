@@ -190,7 +190,17 @@ export class RenderPipeline {
       return;
     }
 
-    const composer = new EffectComposer(this.renderer);
+    // EffectComposer's default target allocates a 16-bit depth renderbuffer.
+    // Across a 2000 m far plane that is nowhere near enough: near-coplanar
+    // ground layers — a track ribbon over its run-off over the terrain — start
+    // z-fighting within a few tens of metres. Asking for a stencil buffer gets
+    // a DEPTH24_STENCIL8 attachment instead, which is 256x the resolution.
+    const target = new THREE.WebGLRenderTarget(this.width, this.height, {
+      type: THREE.HalfFloatType,
+      depthBuffer: true,
+      stencilBuffer: true,
+    });
+    const composer = new EffectComposer(this.renderer, target);
     composer.setPixelRatio(this.renderer.getPixelRatio());
 
     this.renderPass = new RenderPass(this.worldScene, this.worldCamera);

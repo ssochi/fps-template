@@ -1,17 +1,9 @@
 import * as THREE from 'three';
-import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import type { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { CollisionWorld } from '../physics/CollisionWorld';
-import {
-  createLightShaftTexture,
-  createPosterTexture,
-  createTextTexture,
-  createWorldMaterials,
-  type PosterKind,
-} from './Materials';
-import { StaticBatcher, mergeStaticHierarchy } from './GeometryMerge';
+import { createLightShaftTexture } from './Materials';
+import { LevelBuilder, type LevelBuildResult } from './LevelBuilder';
 import { RangeTarget, type TargetKind } from './Targets';
-import type { WeaponId } from '../weapons/WeaponTypes';
-import { WEAPON_CONFIGS, WEAPON_ORDER } from '../weapons/WeaponConfigs';
 import { randRange } from '../core/MathUtils';
 
 /**
@@ -24,30 +16,8 @@ import { randRange } from '../core/MathUtils';
  * of dozen draw calls.
  */
 
-export interface WeaponPickup {
-  id: WeaponId;
-  position: THREE.Vector3;
-  /** Pedestal display model, spun for readability. */
-  display: THREE.Object3D;
-  radius: number;
-}
-
-export interface RangeBuildResult {
-  root: THREE.Group;
-  targets: RangeTarget[];
-  /** Meshes the shooting raycast tests against. */
-  collidables: THREE.Object3D[];
-  pickups: WeaponPickup[];
-  spawnPoint: THREE.Vector3;
-  spawnYaw: number;
-  sun: THREE.DirectionalLight;
-  sky: Sky;
-  /** Lights and effects disabled on the lower quality presets. */
-  optionalLights: THREE.Light[];
-  atmospherics: THREE.Object3D[];
-  /** Drives animated scenery (dust motes, lamp flicker). */
-  update: (dt: number) => void;
-}
+/** @deprecated Retained for callers written before the level abstraction. */
+export type RangeBuildResult = LevelBuildResult;
 
 const LANE_CENTRES = [-16, -8, 0, 8, 16];
 const LANE_HALF_WIDTH = 4;
@@ -55,48 +25,12 @@ const RANGE_LENGTH = 170;
 const ROOF_Y = 4.6;
 const PAD_TOP = 0.15;
 
-type SurfaceTag = 'concrete' | 'metal' | 'dirt' | 'wood';
-
-interface BoxOptions {
-  /** Register an AABB with the collision world. */
-  solid?: boolean;
-  surface?: SurfaceTag;
-  /** Include in the shooting raycast. */
-  shootable?: boolean;
-  castShadow?: boolean;
-  receiveShadow?: boolean;
-  /** Rotation about Y, radians. Collision still uses the axis-aligned bounds. */
-  rotationY?: number;
-}
-
-export class ShootingRange {
-  private readonly materials = createWorldMaterials();
-  private readonly root = new THREE.Group();
-  private readonly batcher = new StaticBatcher();
-  private readonly collidables: THREE.Object3D[] = [];
-  private readonly targets: RangeTarget[] = [];
-  private readonly pickups: WeaponPickup[] = [];
-  private readonly optionalLights: THREE.Light[] = [];
-  private readonly atmospherics: THREE.Object3D[] = [];
-  private readonly world: CollisionWorld;
-
-  private readonly signMaterials = new Map<string, THREE.MeshStandardMaterial>();
-  private readonly tmpMatrix = new THREE.Matrix4();
-  private readonly tmpQuat = new THREE.Quaternion();
-  private readonly tmpEuler = new THREE.Euler();
-  private readonly tmpScale = new THREE.Vector3(1, 1, 1);
-  private readonly tmpPos = new THREE.Vector3();
-
-  private dustUniform: { value: number } | null = null;
-  private readonly flickerLamps: { light: THREE.Light; base: number; phase: number }[] = [];
-  private elapsed = 0;
-
+export class ShootingRange extends LevelBuilder {
   constructor(world: CollisionWorld) {
-    this.world = world;
-    this.root.name = 'shooting-range';
+    super(world, 'shooting-range');
   }
 
-  build(): RangeBuildResult {
+  build(): LevelBuildResult {
     this.buildGround();
     this.buildSurroundings();
     this.buildFiringLine();
@@ -107,171 +41,37 @@ export class ShootingRange {
     this.buildTargets();
     this.buildFiringLineProps();
     this.buildDownrangeProps();
-    this.buildWeaponPedestals();
+    this.pedestalRow({
+      origin: [0, 0, 9.5],
+      facing: Math.PI,
+      label: 'LOADOUT — PRESS 1-0 OR WALK UP',
+    });
 
     const { sun, sky } = this.buildLighting();
     this.buildAtmospherics();
 
     // Merge everything queued so far into a handful of meshes.
-    const merged = this.batcher.build(this.root, 'range');
-    this.collidables.push(...merged);
+    this.flushBatch('range');
 
     return {
+      id: 'range',
+      name: 'Shooting Range',
       root: this.root,
       targets: this.targets,
       collidables: this.collidables,
       pickups: this.pickups,
+      ammoCrates: this.ammoCrates,
       spawnPoint: new THREE.Vector3(0, PAD_TOP + 0.02, 4),
       spawnYaw: 0,
       sun,
       sky,
       optionalLights: this.optionalLights,
       atmospherics: this.atmospherics,
-      update: (dt: number) => this.update(dt),
+      background: new THREE.Color(0x8fb4d8),
+      fog: new THREE.Fog(0xa9c4dd, 130, 760),
+      update: (dt: number) => this.tick(dt),
+      dispose: () => this.disposeOwned(),
     };
-  }
-
-  private update(dt: number): void {
-    this.elapsed += dt;
-    if (this.dustUniform) this.dustUniform.value = this.elapsed;
-    for (const lamp of this.flickerLamps) {
-      // Subtle mains hum flicker; never dips far enough to read as broken.
-      const n =
-        Math.sin(this.elapsed * 11 + lamp.phase) * 0.5 +
-        Math.sin(this.elapsed * 27.3 + lamp.phase * 2.1) * 0.5;
-      lamp.light.intensity = lamp.base * (1 + n * 0.035);
-    }
-  }
-
-  // ----------------------------------------------------------------- helpers
-
-  /**
-   * Queues a box into the static batch and, unless told otherwise, registers a
-   * collision AABB and marks it shootable. This is the single place level
-   * geometry gets wired up.
-   */
-  private box(
-    w: number,
-    h: number,
-    d: number,
-    x: number,
-    y: number,
-    z: number,
-    material: THREE.Material,
-    opts: BoxOptions = {},
-  ): void {
-    const geo = new THREE.BoxGeometry(w, h, d);
-    this.tmpEuler.set(0, opts.rotationY ?? 0, 0);
-    this.tmpQuat.setFromEuler(this.tmpEuler);
-    this.tmpMatrix.compose(this.tmpPos.set(x, y, z), this.tmpQuat, this.tmpScale);
-
-    this.batcher.add(geo, material, this.tmpMatrix, {
-      surface: opts.surface ?? 'concrete',
-      castShadow: opts.castShadow ?? true,
-      receiveShadow: opts.receiveShadow ?? true,
-      shootable: opts.shootable ?? true,
-    });
-    geo.dispose();
-
-    if (opts.solid !== false) {
-      // Rotated props still collide as their axis-aligned footprint, which is
-      // fine for the low, walk-around scenery this is used for.
-      const rot = Math.abs(opts.rotationY ?? 0);
-      const cos = Math.abs(Math.cos(rot));
-      const sin = Math.abs(Math.sin(rot));
-      this.world.addBox(
-        new THREE.Vector3(x, y, z),
-        new THREE.Vector3(w * cos + d * sin, h, d * cos + w * sin),
-        opts.surface ?? 'concrete',
-      );
-    }
-  }
-
-  /** Queues an arbitrary transformed mesh into the static batch. */
-  private prop(
-    geo: THREE.BufferGeometry,
-    material: THREE.Material,
-    position: [number, number, number],
-    rotation: [number, number, number] = [0, 0, 0],
-    opts: { surface?: SurfaceTag; shootable?: boolean; castShadow?: boolean; scale?: number } = {},
-  ): void {
-    this.tmpEuler.set(rotation[0], rotation[1], rotation[2]);
-    this.tmpQuat.setFromEuler(this.tmpEuler);
-    const s = opts.scale ?? 1;
-    this.tmpMatrix.compose(
-      this.tmpPos.set(position[0], position[1], position[2]),
-      this.tmpQuat,
-      this.tmpScale.set(s, s, s),
-    );
-    this.tmpScale.set(1, 1, 1);
-    this.batcher.add(geo, material, this.tmpMatrix, {
-      surface: opts.surface ?? 'metal',
-      castShadow: opts.castShadow ?? true,
-      shootable: opts.shootable ?? true,
-    });
-  }
-
-  /**
-   * A flat signboard. Materials are cached by content so repeated signs (the
-   * distance markers on both sides of the range) batch into one draw call.
-   */
-  private sign(
-    text: string,
-    subtitle: string | undefined,
-    x: number,
-    y: number,
-    z: number,
-    width = 2,
-    height = 1,
-    rotationY = 0,
-  ): void {
-    const key = `${text}|${subtitle ?? ''}|${width}|${height}`;
-    let material = this.signMaterials.get(key);
-    if (!material) {
-      const tex = createTextTexture(text, {
-        subtitle,
-        background: '#12161b',
-        borderColor: '#f0b400',
-        color: '#f5f5f0',
-        width: 512,
-        height: Math.round((512 * height) / width),
-      });
-      material = new THREE.MeshStandardMaterial({
-        map: tex,
-        roughness: 0.85,
-        side: THREE.DoubleSide,
-      });
-      this.signMaterials.set(key, material);
-    }
-
-    const geo = new THREE.PlaneGeometry(width, height);
-    this.tmpEuler.set(0, rotationY, 0);
-    this.tmpQuat.setFromEuler(this.tmpEuler);
-    this.tmpMatrix.compose(this.tmpPos.set(x, y, z), this.tmpQuat, this.tmpScale);
-    this.batcher.add(geo, material, this.tmpMatrix, {
-      surface: 'metal',
-      castShadow: false,
-      shootable: true,
-    });
-    geo.dispose();
-  }
-
-  /** A wall poster; each kind gets its own material, so keep the set small. */
-  private poster(kind: PosterKind, x: number, y: number, z: number, height = 1.1, rotationY = 0): void {
-    const material = new THREE.MeshStandardMaterial({
-      map: createPosterTexture(kind),
-      roughness: 0.95,
-    });
-    const geo = new THREE.PlaneGeometry(height * 0.75, height);
-    this.tmpEuler.set(0, rotationY, 0);
-    this.tmpQuat.setFromEuler(this.tmpEuler);
-    this.tmpMatrix.compose(this.tmpPos.set(x, y, z), this.tmpQuat, this.tmpScale);
-    this.batcher.add(geo, material, this.tmpMatrix, {
-      surface: 'concrete',
-      castShadow: false,
-      shootable: true,
-    });
-    geo.dispose();
   }
 
   // ------------------------------------------------------------------ ground
@@ -778,6 +578,7 @@ export class ShootingRange {
       this.box(0.62, 0.3, 0.36, -19.5, 0.15 + i * 0.31, 10.4, m.paintedGreen, { surface: 'metal' });
     }
     this.sign('AMMO — PRESS E TO RESUPPLY', undefined, -21.5, 1.9, 9.95, 5.4, 1.1, Math.PI);
+    this.ammoCrates.push({ position: new THREE.Vector3(-20, 0, 10.5), radius: 3.5 });
 
     // Wall kit: extinguisher, first-aid box, tool board.
     this.prop(new THREE.CylinderGeometry(0.11, 0.11, 0.55, 14), m.paintedRed, [-2, 0.85, 13.3], [0, 0, 0], {
@@ -974,84 +775,20 @@ export class ShootingRange {
     }
   }
 
-  // -------------------------------------------------------- weapon pedestals
-
-  private buildWeaponPedestals(): void {
-    const m = this.materials;
-    const count = WEAPON_ORDER.length;
-    const spacing = 3.4;
-    const startX = -((count - 1) * spacing) / 2;
-
-    for (let i = 0; i < count; i++) {
-      const id = WEAPON_ORDER[i];
-      const cfg = WEAPON_CONFIGS[id];
-      const x = startX + i * spacing;
-      const z = 9.5;
-
-      this.box(1.15, 1.0, 1.15, x, 0.5, z, m.metalDark, { surface: 'metal' });
-      this.box(1.28, 0.07, 1.28, x, 1.02, z, m.emissiveCyan, { surface: 'metal', solid: false });
-      this.box(1.05, 0.06, 1.05, x, 0.06, z, m.metal, { surface: 'metal', solid: false });
-
-      const display = new THREE.Group();
-      display.position.set(x, 1.55, z);
-      this.root.add(display);
-
-      this.sign(cfg.category, `${cfg.slot % 10}`, x, 2.3, z - 0.7, 1.5, 0.75, Math.PI);
-
-      this.pickups.push({ id, position: new THREE.Vector3(x, 0, z), display, radius: 1.7 });
-    }
-
-    this.sign('LOADOUT — PRESS 1-0 OR WALK UP', undefined, 0, 3.1, 8.4, 10, 1.2, Math.PI);
-
-    // Two wash lights cover the whole row instead of one per pedestal — ten
-    // point lights for ten plinths is a real cost in a forward renderer.
-    for (const x of [-8, 8]) {
-      const wash = new THREE.PointLight(0x8fe4ff, 26, 12, 2);
-      wash.position.set(x, 2.6, 9.5);
-      this.root.add(wash);
-      this.optionalLights.push(wash);
-    }
-  }
-
   // --------------------------------------------------------------- lighting
 
   private buildLighting(): { sun: THREE.DirectionalLight; sky: Sky } {
     const m = this.materials;
 
-    const sky = new Sky();
-    sky.scale.setScalar(45000);
-    const uniforms = sky.material.uniforms;
-    uniforms.turbidity.value = 5.5;
-    uniforms.rayleigh.value = 1.8;
-    uniforms.mieCoefficient.value = 0.004;
-    uniforms.mieDirectionalG.value = 0.76;
-
     // Mid-afternoon sun placed *behind* the firing line so the shooter is never
     // staring into it and downrange targets stay well lit.
-    const elevation = 34;
-    const azimuth = 35;
-    const phi = THREE.MathUtils.degToRad(90 - elevation);
-    const theta = THREE.MathUtils.degToRad(azimuth);
-    const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
-    uniforms.sunPosition.value.copy(sunPosition);
-    this.root.add(sky);
-
-    const sun = new THREE.DirectionalLight(0xfff0d8, 2.0);
-    sun.position.copy(sunPosition).multiplyScalar(140);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 380;
-    sun.shadow.camera.left = -75;
-    sun.shadow.camera.right = 75;
-    sun.shadow.camera.top = 65;
-    sun.shadow.camera.bottom = -65;
-    sun.shadow.bias = -0.0006;
-    sun.shadow.normalBias = 0.035;
-    // Keep the shadow frustum centred on the action rather than the whole map.
-    sun.target.position.set(0, 0, -40);
-    this.root.add(sun);
-    this.root.add(sun.target);
+    const { sun, sky } = this.buildSkyAndSun({
+      elevation: 34,
+      azimuth: 35,
+      intensity: 2.0,
+      shadowRadius: 75,
+      shadowTarget: [0, 0, -40],
+    });
 
     const hemi = new THREE.HemisphereLight(0xbdd7ff, 0x6a6250, 1.35);
     this.root.add(hemi);
@@ -1132,6 +869,7 @@ export class ShootingRange {
     const shaftGeo = new THREE.ConeGeometry(1.5, 3.4, 12, 1, true);
     // Cone apex is at +Y; flip it so the wide end lands on the floor.
     shaftGeo.rotateX(Math.PI);
+    this.owned.push(shaftMat, shaftGeo);
 
     const shafts = new THREE.Group();
     shafts.name = 'light-shafts';
@@ -1147,71 +885,9 @@ export class ShootingRange {
     this.atmospherics.push(shafts);
 
     // Dust motes animated entirely on the GPU.
-    const count = 520;
-    const positions = new Float32Array(count * 3);
-    const seeds = new Float32Array(count);
-    for (let i = 0; i < count; i++) {
-      positions[i * 3] = randRange(-26, 26);
-      positions[i * 3 + 1] = randRange(0.3, 4.3);
-      positions[i * 3 + 2] = randRange(-10, 14);
-      seeds[i] = Math.random() * 100;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 1));
-    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2, 2), 40);
-
-    const uTime = { value: 0 };
-    this.dustUniform = uTime;
-    const dustMat = new THREE.ShaderMaterial({
-      uniforms: {
-        uTime,
-        uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
-      },
-      vertexShader: /* glsl */ `
-        attribute float aSeed;
-        uniform float uTime;
-        uniform float uPixelRatio;
-        varying float vFade;
-        void main() {
-          vec3 p = position;
-          // Slow, looping drift so motes never leave the bay.
-          p.x += sin(uTime * 0.11 + aSeed) * 1.6;
-          p.y += sin(uTime * 0.19 + aSeed * 1.7) * 0.5;
-          p.z += cos(uTime * 0.09 + aSeed * 0.7) * 1.6;
-          vec4 mv = modelViewMatrix * vec4(p, 1.0);
-          // Twinkle, and fade out the ones closest to the camera so they read
-          // as motes hanging in the air rather than snow on the lens.
-          vFade = (0.35 + 0.65 * abs(sin(uTime * 0.9 + aSeed * 3.1)))
-                * smoothstep(1.5, 6.0, -mv.z);
-          gl_PointSize = (0.8 + 0.5 * sin(aSeed)) * uPixelRatio * (11.0 / max(0.1, -mv.z));
-          gl_Position = projectionMatrix * mv;
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        varying float vFade;
-        void main() {
-          vec2 uv = gl_PointCoord - 0.5;
-          float d = 1.0 - smoothstep(0.15, 0.5, length(uv));
-          if (d <= 0.001) discard;
-          gl_FragColor = vec4(vec3(1.0, 0.97, 0.9), d * vFade * 0.22);
-        }
-      `,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
+    this.buildDustField({
+      count: 520,
+      bounds: { x: [-26, 26], y: [0.3, 4.3], z: [-10, 14] },
     });
-
-    const dust = new THREE.Points(geo, dustMat);
-    dust.name = 'dust-motes';
-    dust.frustumCulled = false;
-    dust.renderOrder = 5;
-    this.root.add(dust);
-    this.atmospherics.push(dust);
-  }
-
-  /** Exposed so `Game` can merge pedestal display weapons after building them. */
-  static mergeDisplay(source: THREE.Object3D, name: string): THREE.Group {
-    return mergeStaticHierarchy(source, name);
   }
 }

@@ -1,3 +1,5 @@
+import type { LevelId } from '../world/LevelBuilder';
+
 export type QualityLevel = 'low' | 'medium' | 'high';
 
 export interface GameSettings {
@@ -8,6 +10,8 @@ export interface GameSettings {
   masterVolume: number;
   sfxVolume: number;
   quality: QualityLevel;
+  /** Which map to load on boot. */
+  level: LevelId;
   showFps: boolean;
   toggleAds: boolean;
   toggleCrouch: boolean;
@@ -26,6 +30,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   masterVolume: 0.8,
   sfxVolume: 1.0,
   quality: 'high',
+  level: 'range',
   showFps: true,
   toggleAds: false,
   toggleCrouch: false,

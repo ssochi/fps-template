@@ -1,4 +1,5 @@
 import type { GameSettings, QualityLevel, Settings } from '../core/Settings';
+import { LEVELS, type LevelId } from '../world/LevelBuilder';
 import { WEAPON_CONFIGS, WEAPON_ORDER } from '../weapons/WeaponConfigs';
 import { THROWABLE_CONFIGS, THROWABLE_ORDER } from '../weapons/ThrowableConfigs';
 
@@ -16,6 +17,7 @@ export interface MenuCallbacks {
   onRespawn: () => void;
   onResetRange: () => void;
   onSettingsChanged: () => void;
+  onLevelChosen: (id: LevelId) => void;
 }
 
 interface ControlEntry {
@@ -44,6 +46,7 @@ const CONTROLS: ControlEntry[] = [
   { keys: ['E'], action: 'Interact / resupply' },
   { keys: ['K'], action: 'Start timed drill' },
   { keys: ['L'], action: 'Reset targets' },
+  { keys: ['M'], action: 'Next map' },
   { keys: ['H'], action: 'Toggle HUD' },
   { keys: ['P'], action: 'Toggle collision debug' },
   { keys: ['Esc'], action: 'Pause / settings' },
@@ -101,14 +104,15 @@ export class Menu {
     return `
       <div id="loading">
         <div class="spinner"></div>
-        <div>Building range…</div>
+        <div>Building world…</div>
       </div>
 
       <div id="start-screen" class="screen hidden">
         <div class="screen__inner">
           <h1>Three.js FPS Template</h1>
           <p class="subtitle">
-            First / third person shooter sandbox — ten weapons, three throwables, a full shooting range.
+            First / third person shooter sandbox — ten weapons, three throwables, and two maps:
+            a full shooting range, and a race circuit whose garage holds a hypercar, a 4x4 and a tank.
           </p>
 
           <h2>Controls</h2>
@@ -119,6 +123,9 @@ export class Menu {
 
           <h2>Throwables</h2>
           <div class="weapon-cards">${this.throwableCardsMarkup()}</div>
+
+          <h2>Maps</h2>
+          <div class="map-cards">${this.mapCardsMarkup()}</div>
 
           <div class="button-row">
             <button class="btn" id="btn-start">Click to play</button>
@@ -200,6 +207,9 @@ export class Menu {
             </div>
           </div>
 
+          <h2>Maps</h2>
+          <div class="map-cards">${this.mapCardsMarkup()}</div>
+
           <h2>Controls</h2>
           <div class="controls-grid">${this.controlsMarkup()}</div>
 
@@ -221,6 +231,16 @@ export class Menu {
         </div>
       </div>
     `;
+  }
+
+  private mapCardsMarkup(): string {
+    return LEVELS.map(
+      (l) => `
+        <button class="map-card" data-level="${l.id}">
+          <h3>${l.name}</h3>
+          <p>${l.blurb}</p>
+        </button>`,
+    ).join('');
   }
 
   private controlsMarkup(): string {
@@ -295,6 +315,14 @@ export class Menu {
     this.bindCheckbox('#set-damagenumbers', 'damageNumbers');
     this.bindCheckbox('#set-fps', 'showFps');
 
+    // Both screens carry a copy of the map picker, so bind them all.
+    for (const card of this.root.querySelectorAll<HTMLElement>('.map-card')) {
+      card.addEventListener('click', () => {
+        const id = card.dataset.level as LevelId | undefined;
+        if (id) this.callbacks.onLevelChosen(id);
+      });
+    }
+
     const quality = this.el<HTMLSelectElement>('#set-quality');
     quality.addEventListener('change', () => {
       this.settings.set('quality', quality.value as QualityLevel);
@@ -347,5 +375,13 @@ export class Menu {
     this.el<HTMLInputElement>('#set-damagenumbers').checked = s.damageNumbers;
     this.el<HTMLInputElement>('#set-fps').checked = s.showFps;
     this.el<HTMLSelectElement>('#set-quality').value = s.quality;
+    this.markActiveLevel(s.level);
+  }
+
+  /** Highlights whichever map is loaded, on every screen that lists them. */
+  markActiveLevel(id: LevelId): void {
+    for (const card of this.root.querySelectorAll<HTMLElement>('.map-card')) {
+      card.classList.toggle('active', card.dataset.level === id);
+    }
   }
 }
