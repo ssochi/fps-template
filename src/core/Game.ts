@@ -6,7 +6,7 @@ import { clamp } from './MathUtils';
 import { CollisionWorld } from '../physics/CollisionWorld';
 import { ShootingRange, type RangeBuildResult } from '../world/ShootingRange';
 import { RangeSession } from '../world/RangeSession';
-import type { RangeTarget } from '../world/Targets';
+import type { RangeTarget, TargetEvent } from '../world/Targets';
 import { Player, type PlayerInputState } from '../player/Player';
 import { CameraController } from '../player/CameraController';
 import { ViewModel } from '../player/ViewModel';
@@ -15,6 +15,8 @@ import { WeaponSystem, type HitInfo, type ShotInfo, type WeaponInput } from '../
 import { WEAPON_CONFIGS, WEAPON_ORDER } from '../weapons/WeaponConfigs';
 import type { WeaponConfig, WeaponId } from '../weapons/WeaponTypes';
 import { buildWeaponModel } from '../weapons/WeaponMeshes';
+import { ThrowableSystem } from '../weapons/ThrowableSystem';
+import type { ThrowableConfig } from '../weapons/ThrowableConfigs';
 import { EffectsSystem } from '../fx/EffectsSystem';
 import { AudioEngine, type ImpactMaterial } from '../audio/AudioEngine';
 import { HUD } from '../ui/HUD';
@@ -22,7 +24,19 @@ import { Menu } from '../ui/Menu';
 
 type GameState = 'loading' | 'menu' | 'playing' | 'paused' | 'dead';
 
-const SLOT_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
+/** Slot keys 1-9 then 0, matching `WEAPON_ORDER`. */
+const SLOT_KEYS = [
+  'Digit1',
+  'Digit2',
+  'Digit3',
+  'Digit4',
+  'Digit5',
+  'Digit6',
+  'Digit7',
+  'Digit8',
+  'Digit9',
+  'Digit0',
+];
 const AMMO_CRATE_POSITION = new THREE.Vector3(-20, 0, 10.5);
 const AMMO_CRATE_RADIUS = 3.5;
 
@@ -49,6 +63,7 @@ export class Game {
   private readonly viewModel: ViewModel;
   private readonly character: CharacterModel;
   private readonly weapons: WeaponSystem;
+  private readonly throwables: ThrowableSystem;
   private readonly effects = new EffectsSystem();
   private readonly audio = new AudioEngine();
   private readonly pipeline: RenderPipeline;
@@ -88,13 +103,16 @@ export class Game {
     this.container = container;
 
     this.scene.background = new THREE.Color(0x8fb4d8);
-    this.scene.fog = new THREE.Fog(0xa9c4dd, 90, 460);
+    this.scene.fog = new THREE.Fog(0xa9c4dd, 130, 760);
 
     // --- world -----------------------------------------------------------
     this.range = new ShootingRange(this.collision).build();
     this.scene.add(this.range.root);
     this.scene.add(this.effects.group);
     this.session = new RangeSession(this.range.targets);
+    for (const target of this.range.targets) {
+      target.onStateChange = (t, event) => this.onTargetStateChange(t, event);
+    }
     this.populatePedestals();
 
     // --- player ----------------------------------------------------------
@@ -133,6 +151,8 @@ export class Game {
         this.session.resetAll();
         this.effects.clear();
         this.weapons.refillAll();
+        this.throwables.clear();
+        this.throwables.refill();
         this.hud.clearTransient();
         this.hud.logEvent('Range reset', 'good');
       },
@@ -182,6 +202,29 @@ export class Game {
       'rifle',
     );
 
+    this.throwables = new ThrowableSystem(this.collision, {
+      getThrowRay: (origin, direction) => this.getThrowRay(origin, direction),
+      onPinPulled: () => this.audio.playPinPull(),
+      onThrown: (config, projectile) => {
+        void projectile;
+        this.audio.playThrow();
+        this.hud.logEvent(`${config.category} out`);
+      },
+      onBounce: (projectile, surface, speed) =>
+        this.audio.playGrenadeBounce(
+          surface as ImpactMaterial,
+          projectile.position,
+          clamp(speed / 8, 0.15, 1),
+        ),
+      onDetonate: (config, position) => this.onDetonate(config, position),
+      onSelectionChanged: (config) => {
+        this.audio.playUi('click');
+        this.hud.logEvent(`${config.name}`);
+      },
+      onEmpty: () => this.audio.playUi('deny'),
+    });
+    this.scene.add(this.throwables.group);
+
     this.effects.onShellLanded = (position) => this.audio.playShellDrop(position);
 
     // --- rendering -------------------------------------------------------
@@ -201,6 +244,7 @@ export class Game {
       this.range.sun.shadow.map?.dispose();
       this.range.sun.shadow.map = null;
       for (const light of this.range.optionalLights) light.visible = preset.optionalLights;
+      for (const object of this.range.atmospherics) object.visible = preset.atmospherics;
     };
 
     this.input = new Input(this.pipeline.canvas);
@@ -262,6 +306,8 @@ export class Game {
     this.cameraController.reset();
     this.character.reset();
     this.weapons.refillAll();
+    this.throwables.clear();
+    this.throwables.refill();
     this.hud.clearTransient();
     this.startPlaying();
   }
@@ -269,12 +315,13 @@ export class Game {
   private populatePedestals(): void {
     for (const pickup of this.range.pickups) {
       const model = buildWeaponModel(pickup.id);
-      const cfg = WEAPON_CONFIGS[pickup.id];
       // Scale each gun so they read at a similar size on their pedestal.
-      const scale = clamp(0.62 / cfg.viewModel.adsDistance, 1.0, 2.4) * (0.85 / model.length + 0.55);
-      model.root.scale.setScalar(clamp(scale, 0.9, 1.9));
+      const scale = clamp(1.05 / Math.max(0.3, model.length), 0.85, 1.9);
+      model.root.scale.setScalar(scale);
       model.root.rotation.set(0, 0, 0.35);
-      pickup.display.add(model.root);
+      // Display models never animate, so flatten them to one mesh per material
+      // instead of paying ~50 draw calls per pedestal.
+      pickup.display.add(ShootingRange.mergeDisplay(model.root, `display-${pickup.id}`));
     }
   }
 
@@ -323,6 +370,7 @@ export class Game {
     } else {
       // Keep transient visuals alive behind the menus.
       this.effects.update(dt, this.cameraController.camera);
+      this.range.update(dt);
       for (const target of this.range.targets) target.update(dt);
       this.handleMenuInput();
     }
@@ -344,7 +392,8 @@ export class Game {
       const info = this.pipeline.info;
       this.hud.setFpsText(
         `${this.displayFps.toFixed(0)} fps\n${info.render.calls} draws\n` +
-          `${(info.render.triangles / 1000).toFixed(0)}k tris\n${this.effects.particleCount} fx`,
+          `${(info.render.triangles / 1000).toFixed(0)}k tris\n` +
+          `${this.effects.particleCount} fx\n${this.throwables.liveCount} nades`,
       );
     }
   }
@@ -389,10 +438,18 @@ export class Game {
     const weaponInput = this.buildWeaponInput();
     this.weapons.update(dt, weaponInput);
 
+    this.throwables.update(dt, {
+      throwDown: this.input.isDown('KeyG'),
+      lobDown: this.input.isDown('KeyG') && this.input.isMouseDown(MOUSE_RIGHT),
+      cyclePressed: this.input.wasPressed('KeyT'),
+      blocked: !this.player.alive,
+    });
+
     this.updateViewModel(dt, lookDelta);
     this.updateCharacter(dt);
     this.updateInteractions();
 
+    this.range.update(dt);
     for (const target of this.range.targets) target.update(dt);
     const drill = this.session.update(dt);
     if (drill.justFinished) {
@@ -424,12 +481,12 @@ export class Game {
         this.hud.logEvent(`Collision debug on — ${this.collision.count} boxes`);
       }
     }
-    if (this.input.wasPressed('KeyT')) {
+    if (this.input.wasPressed('KeyL')) {
       this.session.resetTargets();
       this.audio.playRangeEvent('targetUp');
       this.hud.logEvent('Targets reset', 'good');
     }
-    if (this.input.wasPressed('KeyG')) {
+    if (this.input.wasPressed('KeyK')) {
       if (this.session.drillState === 'idle' || this.session.drillState === 'finished') {
         this.session.startDrill();
         this.audio.playRangeEvent('start');
@@ -526,7 +583,8 @@ export class Game {
       fireModePressed: this.input.wasPressed('KeyB'),
       inspectPressed: this.input.wasPressed('KeyF'),
       switchTo,
-      blocked: false,
+      // A grenade in hand locks out the gun until the throw completes.
+      blocked: this.throwables.busy,
       sprinting: this.player.sprinting,
       moveIntensity: this.player.moveIntensity,
       airborne: !this.player.grounded,
@@ -556,6 +614,14 @@ export class Game {
       inspectProgress: this.weapons.inspectProgress,
       crouchAmount: this.player.crouchAmount,
       bobScale: this.settings.get('viewBob'),
+      throwable:
+        this.throwables.activity === 'idle'
+          ? null
+          : {
+              id: this.throwables.currentId,
+              state: this.throwables.activity === 'cooking' ? 'cook' : 'throw',
+              progress: Math.max(0, this.throwables.throwProgress),
+            },
     });
   }
 
@@ -600,6 +666,7 @@ export class Game {
     if (this.interactTarget && this.input.wasPressed('KeyE')) {
       if (this.interactTarget === 'ammo') {
         this.weapons.refillAll();
+        this.throwables.refill();
         this.audio.playUi('confirm');
         this.hud.logEvent('Ammunition resupplied', 'good');
       } else {
@@ -638,6 +705,91 @@ export class Game {
 
     this.character.getWorldMuzzle(origin);
     direction.copy(this.tmpAimPoint).sub(origin).normalize();
+  }
+
+  /** Grenades leave the hand slightly right of and below the eye line. */
+  private getThrowRay(origin: THREE.Vector3, direction: THREE.Vector3): void {
+    const camera = this.cameraController.camera;
+    this.cameraController.getAimDirection(direction);
+    origin.copy(camera.position);
+    this.tmpVec3.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    origin.addScaledVector(this.tmpVec3, 0.22).addScaledVector(direction, 0.35);
+    origin.y -= 0.12;
+  }
+
+  private onDetonate(config: ThrowableConfig, position: THREE.Vector3): void {
+    const groundY = this.player.position.y;
+    switch (config.id) {
+      case 'frag':
+        this.effects.spawnExplosion(position, config.damageRadius, groundY);
+        this.audio.playExplosion(position);
+        this.cameraController.addTrauma(this.blastFalloff(position, config.damageRadius) * 1.4);
+        this.applyBlastDamage(config, position);
+        break;
+
+      case 'smoke':
+        this.effects.spawnSmokeCloud(position, config.smokeRadius, config.smokeDuration);
+        this.audio.playSmokePop(position);
+        break;
+
+      case 'flash': {
+        this.effects.spawnFlashBurst(position);
+        this.audio.playFlashBang(position);
+        this.applyFlashBlindness(config, position);
+        this.cameraController.addTrauma(this.blastFalloff(position, config.flashRadius) * 0.7);
+        break;
+      }
+    }
+  }
+
+  /** 0..1 proximity factor for the player, ignoring line of sight. */
+  private blastFalloff(position: THREE.Vector3, radius: number): number {
+    this.player.getEyePosition(this.tmpVec3);
+    const d = this.tmpVec3.distanceTo(position);
+    return clamp(1 - d / Math.max(0.001, radius), 0, 1);
+  }
+
+  private applyBlastDamage(config: ThrowableConfig, position: THREE.Vector3): void {
+    // Targets in range take falloff damage, but only with line of sight.
+    for (const target of this.range.targets) {
+      target.getCentre(this.tmpVec2);
+      const distance = this.tmpVec2.distanceTo(position);
+      if (distance > config.damageRadius) continue;
+      if (!this.collision.hasLineOfSight(position, this.tmpVec2)) continue;
+
+      const falloff = 1 - distance / config.damageRadius;
+      const damage = config.damage * falloff * falloff;
+      const result = target.registerHit(this.tmpVec2, 'body', this.tmpVec2, damage);
+      this.session.registerHit(target, result.score);
+      if (result.knockedDown) this.hud.logEvent(`${target.label} down`, 'good');
+    }
+
+    // The thrower is not immune.
+    this.player.getEyePosition(this.tmpVec3);
+    const distance = this.tmpVec3.distanceTo(position);
+    if (distance < config.damageRadius && this.collision.hasLineOfSight(position, this.tmpVec3)) {
+      const falloff = 1 - distance / config.damageRadius;
+      this.player.damage(config.damage * falloff * falloff * 0.6, 'hit');
+    }
+  }
+
+  private applyFlashBlindness(config: ThrowableConfig, position: THREE.Vector3): void {
+    this.player.getEyePosition(this.tmpVec3);
+    const distance = this.tmpVec3.distanceTo(position);
+    if (distance > config.flashRadius) return;
+    if (!this.collision.hasLineOfSight(position, this.tmpVec3)) return;
+
+    // Looking at it is far worse than catching it in the corner of your eye.
+    this.cameraController.getAimDirection(this.tmpVec2);
+    this.tmpVec.copy(position).sub(this.tmpVec3).normalize();
+    const facing = clamp(this.tmpVec2.dot(this.tmpVec), -1, 1);
+    const view = clamp((facing + 0.35) / 1.35, 0.12, 1);
+    const proximity = 1 - distance / config.flashRadius;
+    const strength = clamp(proximity * proximity * view, 0, 1);
+    if (strength < 0.03) return;
+
+    this.hud.applyFlash(strength);
+    this.audio.deafen(strength, config.flashDuration * strength);
   }
 
   private raycastWorld(
@@ -759,7 +911,7 @@ export class Game {
     if (!target) return;
 
     this.cameraController.getAimDirection(this.hitCentre);
-    const result = target.registerHit(hit.point, hit.zone, this.hitCentre);
+    const result = target.registerHit(hit.point, hit.zone, this.hitCentre, hit.damage);
     this.session.registerHit(target, result.score);
 
     const headshot = hit.zone === 'head';
@@ -784,6 +936,12 @@ export class Game {
     if (result.knockedDown) {
       this.hud.logEvent(`${target.label} down`, 'good');
     }
+  }
+
+  private onTargetStateChange(target: RangeTarget, event: TargetEvent): void {
+    target.getCentre(this.tmpVec3);
+    if (event === 'down') this.audio.playTargetFall(this.tmpVec3);
+    else this.audio.playTargetReset(this.tmpVec3);
   }
 
   private projectToScreen(world: THREE.Vector3, out: THREE.Vector2): boolean {
@@ -842,6 +1000,11 @@ export class Game {
       drillTime: this.session.bannerTime,
       prompt,
       promptKey,
+      throwable: {
+        name: this.throwables.config.category,
+        count: this.throwables.count,
+        cook: this.throwables.cookFraction,
+      },
     });
   }
 

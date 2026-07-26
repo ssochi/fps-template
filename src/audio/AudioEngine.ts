@@ -49,6 +49,7 @@ export class AudioEngine {
   private readonly reverbSend: GainNode;
   private readonly reverb: ConvolverNode;
   private readonly reverbReturn: GainNode;
+  private readonly deafenFilter: BiquadFilterNode;
 
   private noiseBuffer!: AudioBuffer;
   private pinkBuffer!: AudioBuffer;
@@ -92,11 +93,17 @@ export class AudioEngine {
     this.reverbReturn = this.ctx.createGain();
     this.reverbReturn.gain.value = 0.85;
 
+    this.deafenFilter = this.ctx.createBiquadFilter();
+    this.deafenFilter.type = 'lowpass';
+    this.deafenFilter.frequency.value = 22000;
+    this.deafenFilter.Q.value = 0.4;
+
     this.sfxBus.connect(this.compressor);
     this.reverbSend.connect(this.reverb);
     this.reverb.connect(this.reverbReturn);
     this.reverbReturn.connect(this.compressor);
-    this.compressor.connect(this.master);
+    this.compressor.connect(this.deafenFilter);
+    this.deafenFilter.connect(this.master);
     this.master.connect(this.ctx.destination);
 
     this.distortionCurve = this.createDistortionCurve(28);
@@ -650,6 +657,130 @@ export class AudioEngine {
         this.tone({ freq: 320, freqEnd: 190, duration: 0.14, peak: 0.14, type: 'sawtooth' });
         break;
     }
+  }
+
+  /** A knock-down target toppling onto its base. */
+  playTargetFall(position: THREE.Vector3): void {
+    const spatial: SpatialOptions = { position, refDistance: 8, maxDistance: 220 };
+    this.burst({ duration: 0.13, peak: 0.45, type: 'lowpass', freq: 900, freqEnd: 180, tail: 0.3 }, spatial);
+    this.tone({ freq: randRange(160, 240), freqEnd: 70, duration: 0.16, peak: 0.3, type: 'triangle' }, spatial);
+    for (let i = 0; i < 3; i++) {
+      this.tone({
+        freq: randRange(900, 2200),
+        duration: randRange(0.08, 0.2),
+        peak: 0.09,
+        delay: 0.05 + i * randRange(0.04, 0.1),
+        tail: 0.3,
+      }, spatial);
+    }
+  }
+
+  /** Pneumatic reset of a knock-down target. */
+  playTargetReset(position: THREE.Vector3): void {
+    const spatial: SpatialOptions = { position, refDistance: 8, maxDistance: 200 };
+    this.burst({ duration: 0.3, peak: 0.22, type: 'highpass', freq: 2600, pink: true }, spatial);
+    this.burst({ duration: 0.05, peak: 0.28, type: 'bandpass', freq: 1400, q: 2, delay: 0.26 }, spatial);
+    this.tone({ freq: 520, freqEnd: 760, duration: 0.1, peak: 0.12, type: 'triangle', delay: 0.24 }, spatial);
+  }
+
+  // -------------------------------------------------------------- grenades
+
+  playPinPull(): void {
+    this.burst({ duration: 0.05, peak: 0.3, type: 'bandpass', freq: 3600, q: 4 });
+    this.tone({ freq: 2100, freqEnd: 1500, duration: 0.06, peak: 0.12, type: 'square', delay: 0.03 });
+  }
+
+  playThrow(): void {
+    this.burst({ duration: 0.18, peak: 0.14, type: 'bandpass', freq: 900, q: 0.7, pink: true });
+  }
+
+  playGrenadeBounce(surface: ImpactMaterial, position: THREE.Vector3, energy: number): void {
+    const spatial: SpatialOptions = {
+      position,
+      refDistance: 4,
+      maxDistance: 60,
+      volume: clamp(energy * 0.35, 0.1, 1),
+    };
+    if (surface === 'metal' || surface === 'steelTarget') {
+      this.tone({ freq: randRange(700, 1500), duration: 0.16, peak: 0.24, tail: 0.3 }, spatial);
+      this.burst({ duration: 0.04, peak: 0.2, type: 'highpass', freq: 2600 }, spatial);
+    } else {
+      this.burst({ duration: 0.07, peak: 0.28, type: 'lowpass', freq: 1400, freqEnd: 300 }, spatial);
+      this.tone({ freq: randRange(220, 340), freqEnd: 120, duration: 0.08, peak: 0.14, type: 'triangle' }, spatial);
+    }
+  }
+
+  /** High-explosive detonation: crack, deep boom and a long tail. */
+  playExplosion(position: THREE.Vector3): void {
+    const spatial: SpatialOptions = { position, refDistance: 14, maxDistance: 600 };
+    this.burst(
+      { duration: 0.5, peak: 1, type: 'lowpass', freq: 9000, freqEnd: 120, tail: 1, distort: true },
+      spatial,
+    );
+    this.tone({ freq: 130, freqEnd: 28, duration: 0.75, peak: 0.95, type: 'triangle', tail: 1 }, spatial);
+    this.tone({ freq: 62, freqEnd: 20, duration: 1.1, peak: 0.7, type: 'sine', tail: 1 }, spatial);
+    this.burst(
+      { duration: 1.5, peak: 0.3, type: 'lowpass', freq: 2400, freqEnd: 160, attack: 0.06, tail: 1, pink: true },
+      spatial,
+    );
+    // Debris rattle.
+    for (let i = 0; i < 6; i++) {
+      this.tone({
+        freq: randRange(400, 2600),
+        duration: randRange(0.06, 0.2),
+        peak: 0.07,
+        delay: randRange(0.15, 0.7),
+        tail: 0.4,
+      }, spatial);
+    }
+  }
+
+  playSmokePop(position: THREE.Vector3): void {
+    const spatial: SpatialOptions = { position, refDistance: 8, maxDistance: 160 };
+    this.burst({ duration: 0.12, peak: 0.5, type: 'bandpass', freq: 900, q: 1.2, tail: 0.4 }, spatial);
+    this.burst(
+      { duration: 2.6, peak: 0.16, type: 'highpass', freq: 1800, attack: 0.15, pink: true },
+      spatial,
+    );
+  }
+
+  playFlashBang(position: THREE.Vector3): void {
+    const spatial: SpatialOptions = { position, refDistance: 12, maxDistance: 400 };
+    this.burst(
+      { duration: 0.3, peak: 1, type: 'highpass', freq: 700, tail: 1, distort: true },
+      spatial,
+    );
+    this.tone({ freq: 320, freqEnd: 60, duration: 0.3, peak: 0.75, type: 'square', tail: 1 }, spatial);
+    this.burst({ duration: 0.9, peak: 0.2, type: 'lowpass', freq: 5000, freqEnd: 400, attack: 0.04, tail: 1 }, spatial);
+  }
+
+  /**
+   * Temporary hearing loss: everything is muffled behind a lowpass and a
+   * tinnitus tone rings over the top.
+   */
+  deafen(amount: number, duration: number): void {
+    if (!this.isRunning) return;
+    const t = this.now();
+    const strength = clamp(amount, 0, 1);
+    const cutoff = 22000 - strength * 21500;
+
+    this.deafenFilter.frequency.cancelScheduledValues(t);
+    this.deafenFilter.frequency.setValueAtTime(Math.max(220, cutoff), t);
+    this.deafenFilter.frequency.exponentialRampToValueAtTime(22000, t + Math.max(0.3, duration));
+
+    // Tinnitus ring.
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(4300 + Math.random() * 400, t);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.05 * strength, t + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(t);
+    osc.stop(t + duration + 0.1);
+    this.trackVoice(osc);
   }
 
   playRangeEvent(kind: 'start' | 'end' | 'targetUp'): void {

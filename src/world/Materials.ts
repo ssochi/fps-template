@@ -443,6 +443,170 @@ export function createBulletHoleTexture(size = 128): THREE.CanvasTexture {
   return tex;
 }
 
+
+/** Chain-link fence panel — alpha-tested diamond mesh. */
+export function createChainLinkTexture(size = 256): THREE.CanvasTexture {
+  const key = `chainlink-${size}`;
+  const cached = textureCache.get(key);
+  if (cached) return cached as THREE.CanvasTexture;
+
+  const { canvas, ctx } = createCanvas(size);
+  ctx.clearRect(0, 0, size, size);
+  ctx.strokeStyle = '#b9bfc6';
+  ctx.lineWidth = size / 42;
+  ctx.lineCap = 'round';
+  const step = size / 6;
+  for (let i = -6; i <= 12; i++) {
+    ctx.beginPath();
+    ctx.moveTo(i * step, 0);
+    ctx.lineTo(i * step + size, size);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(i * step, size);
+    ctx.lineTo(i * step + size, 0);
+    ctx.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  textureCache.set(key, tex);
+  return tex;
+}
+
+/** Vertical gradient used for the volumetric-looking light shafts. */
+export function createLightShaftTexture(): THREE.CanvasTexture {
+  const key = 'light-shaft';
+  const cached = textureCache.get(key);
+  if (cached) return cached as THREE.CanvasTexture;
+
+  const w = 32;
+  const h = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2D canvas context unavailable');
+
+  // Cone UVs run v = 0 at the base, v = 1 at the apex, so the bright end is
+  // at the bottom of the image.
+  const grad = ctx.createLinearGradient(0, h, 0, 0);
+  grad.addColorStop(0, 'rgba(255,255,255,0)');
+  grad.addColorStop(0.55, 'rgba(255,255,255,0.09)');
+  grad.addColorStop(1, 'rgba(255,255,255,0.5)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  textureCache.set(key, tex);
+  return tex;
+}
+
+export type PosterKind = 'safety' | 'zones' | 'rules' | 'hazard';
+
+/** Wall posters for the covered firing line. */
+export function createPosterTexture(kind: PosterKind): THREE.CanvasTexture {
+  const key = `poster-${kind}`;
+  const cached = textureCache.get(key);
+  if (cached) return cached as THREE.CanvasTexture;
+
+  const w = 384;
+  const h = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2D canvas context unavailable');
+
+  ctx.fillStyle = '#e9e5da';
+  ctx.fillRect(0, 0, w, h);
+  // Aged paper speckle.
+  for (let i = 0; i < 900; i++) {
+    ctx.fillStyle = `rgba(120,110,95,${Math.random() * 0.06})`;
+    ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
+  }
+
+  const headline = (text: string, colour: string): void => {
+    ctx.fillStyle = colour;
+    ctx.fillRect(0, 0, w, 86);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 40px "Arial Black", Impact, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, w / 2, 44);
+  };
+
+  const lines = (items: string[], startY: number): void => {
+    ctx.fillStyle = '#26262a';
+    ctx.font = '22px "Courier New", monospace';
+    ctx.textAlign = 'left';
+    items.forEach((line, i) => ctx.fillText(line, 26, startY + i * 40));
+  };
+
+  switch (kind) {
+    case 'safety':
+      headline('RANGE SAFETY', '#c62828');
+      lines(
+        ['1. TREAT EVERY WEAPON', '   AS LOADED', '2. MUZZLE DOWNRANGE', '3. FINGER OFF TRIGGER', '4. KNOW YOUR TARGET', '   AND BEYOND'],
+        150,
+      );
+      break;
+    case 'zones':
+      headline('SCORING ZONES', '#1565c0');
+      ctx.strokeStyle = '#26262a';
+      ctx.lineWidth = 3;
+      for (let i = 5; i >= 1; i--) {
+        ctx.beginPath();
+        ctx.arc(w / 2, 300, i * 30, 0, Math.PI * 2);
+        ctx.fillStyle = i <= 2 ? '#c62828' : '#f2eee3';
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#26262a';
+      ctx.font = 'bold 22px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('HEAD x2.4   BODY x1.0', w / 2, 470);
+      break;
+    case 'rules':
+      headline('LANE ASSIGNMENT', '#2e7d32');
+      lines(
+        ['LANE 1  CQB STEEL', 'LANE 2  PENETRATION', 'LANE 3  PRECISION', 'LANE 4  MOVERS', 'LANE 5  LONG RANGE'],
+        160,
+      );
+      break;
+    case 'hazard':
+      headline('EYE + EAR PPE', '#f0b400');
+      ctx.fillStyle = '#26262a';
+      ctx.beginPath();
+      ctx.ellipse(w / 2, 250, 110, 55, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#e9e5da';
+      ctx.beginPath();
+      ctx.ellipse(w / 2 - 45, 250, 38, 34, 0, 0, Math.PI * 2);
+      ctx.ellipse(w / 2 + 45, 250, 38, 34, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#26262a';
+      ctx.font = 'bold 26px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('MANDATORY', w / 2, 400);
+      ctx.fillText('BEYOND THIS POINT', w / 2, 436);
+      break;
+  }
+
+  ctx.strokeStyle = 'rgba(40,40,40,0.5)';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(2, 2, w - 4, h - 4);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  textureCache.set(key, tex);
+  return tex;
+}
+
 /** Renders text onto a transparent canvas texture — used for range signage. */
 export function createTextTexture(
   text: string,
@@ -510,6 +674,17 @@ export interface WorldMaterials {
   emissiveCyan: THREE.MeshStandardMaterial;
   hazard: THREE.MeshStandardMaterial;
   grass: THREE.MeshStandardMaterial;
+  paintedRed: THREE.MeshStandardMaterial;
+  paintedYellow: THREE.MeshStandardMaterial;
+  paintedGreen: THREE.MeshStandardMaterial;
+  paintedBlue: THREE.MeshStandardMaterial;
+  plastic: THREE.MeshStandardMaterial;
+  sandbag: THREE.MeshStandardMaterial;
+  tarp: THREE.MeshStandardMaterial;
+  glass: THREE.MeshPhysicalMaterial;
+  chainLink: THREE.MeshStandardMaterial;
+  lampLens: THREE.MeshStandardMaterial;
+  dirtBerm: THREE.MeshStandardMaterial;
 }
 
 /** Yellow/black hazard stripes for range boundaries. */
@@ -613,7 +788,7 @@ export function createWorldMaterials(): WorldMaterials {
     emissiveCyan: new THREE.MeshStandardMaterial({
       color: 0x001114,
       emissive: 0x28e0ff,
-      emissiveIntensity: 2.6,
+      emissiveIntensity: 1.5,
       roughness: 0.6,
     }),
     hazard: new THREE.MeshStandardMaterial({ map: buildHazard(), roughness: 0.8, metalness: 0.1 }),
@@ -624,6 +799,42 @@ export function createWorldMaterials(): WorldMaterials {
       roughness: 1.0,
       metalness: 0.0,
     }),
+    paintedRed: new THREE.MeshStandardMaterial({ color: 0xa8332a, roughness: 0.62, metalness: 0.25 }),
+    paintedYellow: new THREE.MeshStandardMaterial({ color: 0xd8a41c, roughness: 0.6, metalness: 0.25 }),
+    paintedGreen: new THREE.MeshStandardMaterial({ color: 0x3f6b48, roughness: 0.68, metalness: 0.2 }),
+    paintedBlue: new THREE.MeshStandardMaterial({ color: 0x2b5a80, roughness: 0.6, metalness: 0.25 }),
+    plastic: new THREE.MeshStandardMaterial({ color: 0x2c3138, roughness: 0.45, metalness: 0.02 }),
+    sandbag: new THREE.MeshStandardMaterial({ color: 0x8a7a55, roughness: 1.0, metalness: 0.0 }),
+    tarp: new THREE.MeshStandardMaterial({
+      color: 0x35402f,
+      roughness: 0.85,
+      metalness: 0.0,
+      side: THREE.DoubleSide,
+    }),
+    glass: new THREE.MeshPhysicalMaterial({
+      color: 0xbfd8e8,
+      roughness: 0.06,
+      metalness: 0,
+      transmission: 0.85,
+      thickness: 0.02,
+      transparent: true,
+      opacity: 0.35,
+    }),
+    chainLink: new THREE.MeshStandardMaterial({
+      map: createChainLinkTexture(),
+      transparent: true,
+      alphaTest: 0.45,
+      roughness: 0.5,
+      metalness: 0.85,
+      side: THREE.DoubleSide,
+    }),
+    lampLens: new THREE.MeshStandardMaterial({
+      color: 0x2a2e33,
+      emissive: 0xdfe9ff,
+      emissiveIntensity: 0.85,
+      roughness: 0.4,
+    }),
+    dirtBerm: new THREE.MeshStandardMaterial({ color: 0x6a5c46, roughness: 1.0, metalness: 0.0 }),
   };
 
   return cachedMaterials;

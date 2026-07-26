@@ -27,8 +27,8 @@ export class RangeSession {
 
   constructor(targets: RangeTarget[]) {
     this.targets = targets;
-    // Reactive targets only — paper doesn't "clear".
-    this.drillTargets = targets.filter((t) => t.kind !== 'paper' && t.kind !== 'silhouette');
+    // Reactive targets only — paper never "clears".
+    this.drillTargets = targets.filter((t) => t.kind !== 'paper');
     this.bestTime = RangeSession.loadBest();
   }
 
@@ -68,8 +68,8 @@ export class RangeSession {
 
     if (this.drillState === 'ready') this.drillState = 'running';
     if (this.drillState === 'running' && this.drillTargets.includes(target)) {
-      // Poppers only count once they're actually down.
-      if (target.kind !== 'popper' || target.down) this.cleared.add(target);
+      // Knock-down targets only count once they're actually down.
+      if (!target.isKnockDown || target.down) this.cleared.add(target);
     }
   }
 

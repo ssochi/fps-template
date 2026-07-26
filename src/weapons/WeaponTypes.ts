@@ -1,11 +1,21 @@
 import type { GunshotProfile } from '../audio/AudioEngine';
 
-export type WeaponId = 'pistol' | 'smg' | 'rifle' | 'sniper' | 'shotgun';
+export type WeaponId =
+  | 'pistol'
+  | 'machinePistol'
+  | 'revolver'
+  | 'smg'
+  | 'rifle'
+  | 'dmr'
+  | 'sniper'
+  | 'lmg'
+  | 'shotgun'
+  | 'autoShotgun';
 
 export type FireMode = 'semi' | 'auto' | 'burst';
 
 /** How the action is cycled — drives both animation and audio. */
-export type ActionType = 'slide' | 'bolt' | 'pump' | 'gas';
+export type ActionType = 'slide' | 'bolt' | 'pump' | 'gas' | 'cylinder';
 
 export interface SpreadConfig {
   /** Cone half-angle in degrees while hip firing, standing still. */

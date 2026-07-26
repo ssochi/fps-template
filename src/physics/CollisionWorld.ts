@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { clamp } from '../core/MathUtils';
 
 export interface Collider {
   box: THREE.Box3;
@@ -19,6 +20,8 @@ export class CollisionWorld {
   private readonly colliders: Collider[] = [];
   private readonly tmpBox = new THREE.Box3();
   private readonly tmpVec = new THREE.Vector3();
+  private readonly tmpRay = new THREE.Ray();
+  private readonly tmpHit = new THREE.Vector3();
 
   addBox(center: THREE.Vector3, size: THREE.Vector3, surface: Collider['surface'] = 'concrete'): Collider {
     const half = size.clone().multiplyScalar(0.5);
@@ -194,5 +197,99 @@ export class CollisionWorld {
     }
 
     return { grounded, hitCeiling, hitWall, groundSurface };
+  }
+
+  /**
+   * Resolves a moving sphere (a thrown grenade) against the static world.
+   *
+   * Integrates the position, then pushes the sphere out of anything it ended up
+   * inside and reflects its velocity off the contact normal.
+   *
+   * @returns the surface it bounced off, or null if it hit nothing.
+   */
+  moveSphere(
+    position: THREE.Vector3,
+    velocity: THREE.Vector3,
+    radius: number,
+    dt: number,
+    restitution = 0.4,
+    friction = 0.55,
+  ): { surface: Collider['surface']; speed: number } | null {
+    position.addScaledVector(velocity, dt);
+
+    let result: { surface: Collider['surface']; speed: number } | null = null;
+
+    for (const c of this.colliders) {
+      // Closest point on the box to the sphere centre.
+      this.tmpVec.set(
+        clamp(position.x, c.box.min.x, c.box.max.x),
+        clamp(position.y, c.box.min.y, c.box.max.y),
+        clamp(position.z, c.box.min.z, c.box.max.z),
+      );
+      const dx = position.x - this.tmpVec.x;
+      const dy = position.y - this.tmpVec.y;
+      const dz = position.z - this.tmpVec.z;
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq >= radius * radius) continue;
+
+      let nx = dx;
+      let ny = dy;
+      let nz = dz;
+      let dist = Math.sqrt(distSq);
+
+      if (dist < 1e-5) {
+        // Centre is inside the box — escape along the shallowest axis.
+        const toMinX = position.x - c.box.min.x;
+        const toMaxX = c.box.max.x - position.x;
+        const toMinY = position.y - c.box.min.y;
+        const toMaxY = c.box.max.y - position.y;
+        const toMinZ = position.z - c.box.min.z;
+        const toMaxZ = c.box.max.z - position.z;
+        const best = Math.min(toMinX, toMaxX, toMinY, toMaxY, toMinZ, toMaxZ);
+        nx = best === toMinX ? -1 : best === toMaxX ? 1 : 0;
+        ny = best === toMinY ? -1 : best === toMaxY ? 1 : 0;
+        nz = best === toMinZ ? -1 : best === toMaxZ ? 1 : 0;
+        dist = 1;
+      } else {
+        nx /= dist;
+        ny /= dist;
+        nz /= dist;
+      }
+
+      const penetration = radius - dist;
+      position.x += nx * penetration;
+      position.y += ny * penetration;
+      position.z += nz * penetration;
+
+      const along = velocity.x * nx + velocity.y * ny + velocity.z * nz;
+      if (along < 0) {
+        const impact = -along;
+        // Reflect the normal component, damp the tangential component.
+        velocity.x -= (1 + restitution) * along * nx;
+        velocity.y -= (1 + restitution) * along * ny;
+        velocity.z -= (1 + restitution) * along * nz;
+        velocity.x *= friction;
+        velocity.y *= friction;
+        velocity.z *= friction;
+        if (!result || impact > result.speed) result = { surface: c.surface, speed: impact };
+      }
+    }
+
+    return result;
+  }
+
+  /** True when the straight line between two points is unobstructed. */
+  hasLineOfSight(from: THREE.Vector3, to: THREE.Vector3): boolean {
+    this.tmpVec.copy(to).sub(from);
+    const distance = this.tmpVec.length();
+    if (distance < 1e-4) return true;
+    this.tmpRay.origin.copy(from);
+    this.tmpRay.direction.copy(this.tmpVec).divideScalar(distance);
+
+    for (const c of this.colliders) {
+      const hit = this.tmpRay.intersectBox(c.box, this.tmpHit);
+      if (hit && from.distanceToSquared(hit) < distance * distance - 1e-4) return false;
+    }
+    return true;
   }
 }

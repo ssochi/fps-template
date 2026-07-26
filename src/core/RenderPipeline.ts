@@ -52,6 +52,8 @@ export interface QualityPreset {
   dynamicMuzzleLight: boolean;
   anisotropy: number;
   optionalLights: boolean;
+  /** Light shafts and dust motes. */
+  atmospherics: boolean;
 }
 
 export const QUALITY_PRESETS: Record<QualityLevel, QualityPreset> = {
@@ -67,6 +69,7 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualityPreset> = {
     dynamicMuzzleLight: false,
     anisotropy: 1,
     optionalLights: false,
+    atmospherics: false,
   },
   medium: {
     pixelRatio: 1.25,
@@ -80,6 +83,7 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualityPreset> = {
     dynamicMuzzleLight: true,
     anisotropy: 4,
     optionalLights: true,
+    atmospherics: true,
   },
   high: {
     pixelRatio: 2,
@@ -93,6 +97,7 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualityPreset> = {
     dynamicMuzzleLight: true,
     anisotropy: 8,
     optionalLights: true,
+    atmospherics: true,
   },
 };
 

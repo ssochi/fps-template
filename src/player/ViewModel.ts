@@ -3,6 +3,7 @@ import { buildWeaponModel, type WeaponModel } from '../weapons/WeaponMeshes';
 import type { WeaponConfig, WeaponId } from '../weapons/WeaponTypes';
 import { clamp, damp, DEG2RAD, lerp, noise1D, Spring, Spring3 } from '../core/MathUtils';
 import { createGlowTexture } from '../world/Materials';
+import { getThrowableModel, type ThrowableId } from '../weapons/ThrowableConfigs';
 
 /**
  * First-person view model.
@@ -43,6 +44,8 @@ export interface ViewModelFrame {
   crouchAmount: number;
   /** Multiplier for sway/bob from settings. */
   bobScale: number;
+  /** Grenade in hand: cooking, or mid-throw with 0..1 progress. */
+  throwable: { id: ThrowableId; state: 'cook' | 'throw'; progress: number } | null;
 }
 
 const HIP_POSITION = new THREE.Vector3(0.125, -0.12, -0.3);
@@ -103,6 +106,12 @@ export class ViewModel {
   private readonly arms: THREE.Group;
   private readonly rightArm: THREE.Group;
   private readonly leftArm: THREE.Group;
+
+  /** Grenade held in the off hand while cooking or throwing. */
+  private readonly throwableHolder = new THREE.Group();
+  private throwableId: ThrowableId | null = null;
+  private readonly throwableCache = new Map<ThrowableId, THREE.Group>();
+  private throwableBlend = 0;
 
   /** Base FOV for the weapon; deliberately narrower than the world camera. */
   weaponFov = 62;
@@ -169,6 +178,74 @@ export class ViewModel {
     this.leftArm = ViewModel.buildArm(false);
     this.arms.add(this.rightArm, this.leftArm);
     this.weaponHolder.add(this.arms);
+
+    this.throwableHolder.visible = false;
+    this.rig.add(this.throwableHolder);
+  }
+
+  private setThrowable(id: ThrowableId | null): void {
+    if (this.throwableId === id) return;
+    this.throwableHolder.clear();
+    this.throwableId = id;
+    if (!id) return;
+    let model = this.throwableCache.get(id);
+    if (!model) {
+      model = getThrowableModel(id);
+      model.traverse((o) => {
+        o.castShadow = false;
+        o.receiveShadow = false;
+      });
+      this.throwableCache.set(id, model);
+    }
+    this.throwableHolder.add(model);
+  }
+
+  /**
+   * Grenade in hand. The weapon drops to a carry position while a throwable is
+   * out, then the throw itself is a wind-up / release / follow-through arc with
+   * the projectile handed off to the world at the release point.
+   */
+  private updateThrowable(dt: number, frame: ViewModelFrame): void {
+    const active = frame.throwable;
+    this.setThrowable(active ? active.id : null);
+
+    const target = active ? 1 : 0;
+    this.throwableBlend = damp(this.throwableBlend, target, 14, dt);
+
+    if (!active && this.throwableBlend < 0.01) {
+      this.throwableHolder.visible = false;
+      return;
+    }
+
+    if (active) {
+      const holder = this.throwableHolder;
+      if (active.state === 'cook') {
+        // Held up and to the left, rolling slightly in the hand.
+        holder.position.set(-0.19, -0.1 + Math.sin(this.idleTime * 2.1) * 0.006, -0.34);
+        holder.rotation.set(0.2, this.idleTime * 0.4, -0.3);
+        holder.visible = true;
+      } else {
+        const t = active.progress;
+        // Wind back, then whip forward; the model is released at 55%.
+        const wind = Math.min(1, t / 0.42);
+        const swing = Math.max(0, (t - 0.42) / 0.18);
+        holder.position.set(
+          -0.19 + wind * -0.12 + swing * 0.4,
+          -0.1 + wind * 0.16 + swing * 0.1,
+          -0.34 + wind * 0.28 - swing * 0.9,
+        );
+        holder.rotation.set(0.2 + wind * 0.9 - swing * 1.6, 0, -0.3 + wind * 0.4);
+        holder.visible = t < 0.55;
+      }
+    }
+
+    // Drop the gun out of the way while a grenade is out.
+    const drop = this.throwableBlend;
+    this.posOffset.x += drop * 0.05;
+    this.posOffset.y -= drop * 0.16;
+    this.posOffset.z += drop * 0.05;
+    this.tmpEuler.x += drop * 0.55;
+    this.tmpEuler.z += drop * 0.35;
   }
 
   private setupLighting(): void {
@@ -466,6 +543,7 @@ export class ViewModel {
     this.applyReload(dt, frame, config);
     this.applyCycle(dt, frame, config);
     this.applyInspect(frame);
+    this.updateThrowable(dt, frame);
 
     // --- assemble ---------------------------------------------------------
     const recoilP = this.recoilPos.update(dt);
@@ -490,6 +568,7 @@ export class ViewModel {
     const scoped = config.scopeFov !== undefined && frame.ads > SCOPE_HIDE_THRESHOLD;
     this.arms.visible = !scoped;
     this.weaponHolder.visible = !scoped;
+    if (scoped) this.throwableHolder.visible = false;
     if (this.model.scopeLens) {
       // Dim the ocular when not looking through it.
       const mat = (this.model.scopeLens as THREE.Mesh).material as THREE.MeshStandardMaterial;

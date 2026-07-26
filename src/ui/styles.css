@@ -365,20 +365,24 @@ canvas {
 #loadout {
   right: 32px;
   bottom: 130px;
-  padding: 8px 10px;
+  padding: 6px 8px;
   min-width: 210px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px 10px;
 }
 
 #loadout .slot {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  font-size: 13px;
-  letter-spacing: 1px;
-  padding: 3px 6px;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  padding: 2px 5px;
   color: var(--hud-dim);
   border-left: 2px solid transparent;
   border-radius: 2px;
+  white-space: nowrap;
 }
 
 #loadout .slot.active {
@@ -429,6 +433,65 @@ canvas {
   letter-spacing: 3px;
   padding: 8px 20px;
   text-transform: uppercase;
+}
+
+/* ------------------------------------------------------------- throwables */
+
+#throwables {
+  right: 262px;
+  bottom: 28px;
+  min-width: 118px;
+  text-align: center;
+  padding: 8px 12px;
+}
+
+#throwables .tw-name {
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: var(--hud-dim);
+}
+
+#throwables .tw-count {
+  font-family: var(--hud-mono);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+#throwables .tw-x {
+  font-size: 14px;
+  color: var(--hud-dim);
+  margin-left: 2px;
+}
+
+#throwables.empty .tw-count {
+  color: var(--hud-danger);
+}
+
+#throwables .tw-cook {
+  height: 4px;
+  margin-top: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+#throwables .tw-cook > div {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--hud-warn), var(--hud-danger));
+}
+
+#throwables.cooking {
+  border-color: rgba(255, 176, 32, 0.7);
+}
+
+#flash-overlay {
+  position: absolute;
+  inset: 0;
+  background: #ffffff;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* -------------------------------------------------------------------- log */
@@ -827,9 +890,10 @@ button.btn.secondary {
   color: #ff6b6b;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   #vitals,
-  #loadout {
+  #loadout,
+  #throwables {
     display: none;
   }
   #ammo {

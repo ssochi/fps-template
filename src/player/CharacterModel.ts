@@ -46,6 +46,7 @@ function makeMaterials(): {
   helmet: THREE.MeshStandardMaterial;
   visor: THREE.MeshStandardMaterial;
   accent: THREE.MeshStandardMaterial;
+  rubberBoot: THREE.MeshStandardMaterial;
 } {
   return {
     skin: new THREE.MeshStandardMaterial({ color: 0xb98763, roughness: 0.85 }),
@@ -62,6 +63,7 @@ function makeMaterials(): {
       emissiveIntensity: 0.5,
     }),
     accent: new THREE.MeshStandardMaterial({ color: 0x8a6b3a, roughness: 0.8 }),
+    rubberBoot: new THREE.MeshStandardMaterial({ color: 0x191b1e, roughness: 0.95 }),
   };
 }
 
@@ -182,6 +184,31 @@ export class CharacterModel {
     strap.position.set(0, 0.2, 0);
     this.chest.add(strap);
 
+    // Radio on the left chest strap, with a stubby antenna.
+    const radio = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.12, 0.05), m.clothDark);
+    radio.position.set(-0.16, 0.14, -0.14);
+    radio.castShadow = true;
+    this.chest.add(radio);
+    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.008, 0.22, 6), m.clothDark);
+    antenna.position.set(-0.16, 0.3, -0.13);
+    antenna.rotation.z = 0.18;
+    this.chest.add(antenna);
+
+    // Admin pouch and a sheathed knife on the plate carrier.
+    const admin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.11, 0.05), m.clothDark);
+    admin.position.set(0.11, 0.14, -0.15);
+    admin.castShadow = true;
+    this.chest.add(admin);
+    const knife = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.17, 0.03), m.vest);
+    knife.position.set(-0.19, -0.02, -0.1);
+    knife.rotation.z = 0.25;
+    this.chest.add(knife);
+
+    // Shoulder patch.
+    const patch = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 0.01), m.accent);
+    patch.position.set(0.19, 0.17, -0.09);
+    this.chest.add(patch);
+
     // --- head -------------------------------------------------------------
     this.neck.position.y = 0.24;
     this.chest.add(this.neck);
@@ -205,6 +232,27 @@ export class CharacterModel {
     const visor = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.02), m.visor);
     visor.position.set(0, 0.085, -0.1);
     this.head.add(visor);
+
+    // Helmet rails, NVG shroud and an IR strobe.
+    for (const sign of [-1, 1]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.03, 0.14), m.clothDark);
+      rail.position.set(sign * 0.115, 0.095, 0);
+      this.head.add(rail);
+    }
+    const shroud = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, 0.04), m.clothDark);
+    shroud.position.set(0, 0.13, -0.095);
+    this.head.add(shroud);
+    const strobe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.03, 0.02, 0.03),
+      new THREE.MeshStandardMaterial({
+        color: 0x141414,
+        emissive: 0x1e6b2a,
+        emissiveIntensity: 1.6,
+        roughness: 0.5,
+      }),
+    );
+    strobe.position.set(0, 0.135, 0.085);
+    this.head.add(strobe);
 
     // --- arms -------------------------------------------------------------
     this.shoulderR.position.set(0.21, 0.19, 0);
@@ -244,6 +292,29 @@ export class CharacterModel {
       this.chest.add(pad);
     }
 
+    // --- belt kit ---------------------------------------------------------
+    const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.07, 14), m.clothDark);
+    belt.scale.set(1.1, 1, 0.85);
+    belt.position.y = 0.02;
+    belt.castShadow = true;
+    this.hips.add(belt);
+    for (let i = 0; i < 4; i++) {
+      const a = -0.9 + i * 0.6;
+      const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.06), m.clothDark);
+      pouch.position.set(Math.sin(a) * 0.2, -0.02, Math.cos(a) * 0.17);
+      pouch.rotation.y = a;
+      pouch.castShadow = true;
+      this.hips.add(pouch);
+    }
+    // Drop-leg holster on the right thigh.
+    const holster = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 0.07), m.vest);
+    holster.position.set(0.15, -0.24, 0.02);
+    holster.castShadow = true;
+    this.hips.add(holster);
+    const holsterStrap = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.18, 0.03), m.accent);
+    holsterStrap.position.set(0.15, -0.12, 0.02);
+    this.hips.add(holsterStrap);
+
     // --- legs -------------------------------------------------------------
     const legLen = 0.46;
     const shinLen = 0.45;
@@ -257,12 +328,26 @@ export class CharacterModel {
       thigh.add(shin);
       shin.position.y = -legLen;
       limb(shin, m.clothDark, 0.062, shinLen);
+      // Knee pad on the shin joint.
+      const knee = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), m.vest);
+      knee.scale.set(1, 0.85, 0.8);
+      knee.position.set(0, 0.01, -0.02);
+      knee.castShadow = true;
+      shin.add(knee);
+
       shin.add(foot);
       foot.position.y = -shinLen;
-      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.08, 0.26), m.clothDark);
-      boot.position.set(0, -0.035, -0.05);
+      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.115, 0.09, 0.24), m.clothDark);
+      boot.position.set(0, -0.04, -0.04);
       boot.castShadow = true;
       foot.add(boot);
+      const sole = new THREE.Mesh(new THREE.BoxGeometry(0.125, 0.03, 0.28), m.rubberBoot);
+      sole.position.set(0, -0.09, -0.05);
+      sole.castShadow = true;
+      foot.add(sole);
+      const toe = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.06, 0.07), m.clothDark);
+      toe.position.set(0, -0.05, -0.15);
+      foot.add(toe);
     }
 
     // --- weapon mount -----------------------------------------------------

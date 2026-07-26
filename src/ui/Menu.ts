@@ -1,5 +1,6 @@
 import type { GameSettings, QualityLevel, Settings } from '../core/Settings';
 import { WEAPON_CONFIGS, WEAPON_ORDER } from '../weapons/WeaponConfigs';
+import { THROWABLE_CONFIGS, THROWABLE_ORDER } from '../weapons/ThrowableConfigs';
 
 /**
  * Full-screen menus: the start screen, the pause / settings screen and the
@@ -31,15 +32,18 @@ const CONTROLS: ControlEntry[] = [
   { keys: ['Mouse 1'], action: 'Fire' },
   { keys: ['Mouse 2'], action: 'Aim down sights' },
   { keys: ['R'], action: 'Reload' },
-  { keys: ['1', '—', '5'], action: 'Select weapon' },
+  { keys: ['1', '—', '9', '0'], action: 'Select weapon' },
   { keys: ['Q'], action: 'Previous weapon' },
   { keys: ['Wheel'], action: 'Cycle weapons' },
   { keys: ['B'], action: 'Toggle fire mode' },
+  { keys: ['G'], action: 'Throw grenade (hold to cook)' },
+  { keys: ['G', '+', 'Mouse 2'], action: 'Underhand lob' },
+  { keys: ['T'], action: 'Cycle grenade type' },
   { keys: ['V'], action: 'First / third person' },
   { keys: ['F'], action: 'Inspect weapon' },
   { keys: ['E'], action: 'Interact / resupply' },
-  { keys: ['T'], action: 'Reset targets' },
-  { keys: ['G'], action: 'Start timed drill' },
+  { keys: ['K'], action: 'Start timed drill' },
+  { keys: ['L'], action: 'Reset targets' },
   { keys: ['H'], action: 'Toggle HUD' },
   { keys: ['P'], action: 'Toggle collision debug' },
   { keys: ['Esc'], action: 'Pause / settings' },
@@ -103,13 +107,18 @@ export class Menu {
       <div id="start-screen" class="screen hidden">
         <div class="screen__inner">
           <h1>Three.js FPS Template</h1>
-          <p class="subtitle">First / third person shooter sandbox — five weapons, a full shooting range.</p>
+          <p class="subtitle">
+            First / third person shooter sandbox — ten weapons, three throwables, a full shooting range.
+          </p>
 
           <h2>Controls</h2>
           <div class="controls-grid">${this.controlsMarkup()}</div>
 
           <h2>Arsenal</h2>
           <div class="weapon-cards">${this.weaponCardsMarkup()}</div>
+
+          <h2>Throwables</h2>
+          <div class="weapon-cards">${this.throwableCardsMarkup()}</div>
 
           <div class="button-row">
             <button class="btn" id="btn-start">Click to play</button>
@@ -223,6 +232,18 @@ export class Menu {
     }).join('');
   }
 
+  private throwableCardsMarkup(): string {
+    return THROWABLE_ORDER.map((id) => {
+      const c = THROWABLE_CONFIGS[id];
+      return `
+        <div class="weapon-card">
+          <div class="cat">${c.category} · ${c.startCount} CARRIED</div>
+          <h3>${c.name}</h3>
+          <p>${c.description}</p>
+        </div>`;
+    }).join('');
+  }
+
   private weaponCardsMarkup(): string {
     const bar = (name: string, value: number): string =>
       `<div class="stat-line"><span class="n">${name}</span><span class="track"><div style="width:${Math.round(
@@ -234,7 +255,7 @@ export class Menu {
       const dps = (c.damage * c.pellets * c.rpm) / 60;
       return `
         <div class="weapon-card">
-          <div class="cat">${c.category} · SLOT ${c.slot}</div>
+          <div class="cat">${c.category} · SLOT ${c.slot % 10}</div>
           <h3>${c.name}</h3>
           <p>${c.description}</p>
           ${bar('DAMAGE', (c.damage * c.pellets) / 130)}

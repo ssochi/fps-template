@@ -46,10 +46,36 @@ interface Flash {
   baseIntensity: number;
 }
 
+interface Shockwave {
+  mesh: THREE.Mesh;
+  life: number;
+  maxLife: number;
+  maxRadius: number;
+}
+
+interface SmokeCloud {
+  position: THREE.Vector3;
+  radius: number;
+  /** Seconds of emission left. */
+  life: number;
+  maxLife: number;
+  /** Fractional particles carried between frames. */
+  accumulator: number;
+}
+
+interface BlastLight {
+  light: THREE.PointLight;
+  life: number;
+  maxLife: number;
+  peak: number;
+}
+
 const MAX_TRACERS = 64;
 const MAX_DECALS = 220;
 const MAX_SHELLS = 48;
 const MAX_FLASHES = 6;
+const MAX_SHOCKWAVES = 6;
+const MAX_BLAST_LIGHTS = 6;
 
 /**
  * All transient visuals: muzzle flashes, tracers, impact debris, bullet holes
@@ -67,6 +93,9 @@ export class EffectsSystem {
   private decalCursor = 0;
   private readonly shells: Shell[] = [];
   private readonly flashes: Flash[] = [];
+  private readonly shockwaves: Shockwave[] = [];
+  private readonly smokeClouds: SmokeCloud[] = [];
+  private readonly blastLights: BlastLight[] = [];
 
   private readonly tmpVec = new THREE.Vector3();
   private readonly tmpVec2 = new THREE.Vector3();
@@ -92,14 +121,45 @@ export class EffectsSystem {
     const glow = createGlowTexture();
     const smokeTex = createSmokeTexture();
 
-    this.sparks = new ParticleSystem(2400, glow, THREE.AdditiveBlending);
-    this.smoke = new ParticleSystem(1200, smokeTex, THREE.NormalBlending);
+    this.sparks = new ParticleSystem(2600, glow, THREE.AdditiveBlending);
+    // Smoke doubles as grenade screening, which needs a lot of live particles.
+    this.smoke = new ParticleSystem(3000, smokeTex, THREE.NormalBlending);
     this.group.add(this.sparks.points, this.smoke.points);
 
     this.buildTracerPool();
     this.buildDecalPool();
     this.buildShellPool();
     this.buildFlashPool();
+    this.buildBlastPool();
+  }
+
+  private buildBlastPool(): void {
+    // Expanding ground ring for explosions.
+    const ringGeo = new THREE.RingGeometry(0.82, 1, 40);
+    ringGeo.rotateX(-Math.PI / 2);
+    for (let i = 0; i < MAX_SHOCKWAVES; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xffd9a0,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      });
+      const mesh = new THREE.Mesh(ringGeo, mat);
+      mesh.visible = false;
+      mesh.renderOrder = 7;
+      this.group.add(mesh);
+      this.shockwaves.push({ mesh, life: 0, maxLife: 0.5, maxRadius: 8 });
+    }
+
+    for (let i = 0; i < MAX_BLAST_LIGHTS; i++) {
+      const light = new THREE.PointLight(0xffb056, 0, 30, 2);
+      light.visible = false;
+      this.group.add(light);
+      this.blastLights.push({ light, life: 0, maxLife: 0.35, peak: 400 });
+    }
   }
 
   // ------------------------------------------------------------------ pools
@@ -512,6 +572,204 @@ export class EffectsSystem {
     shell.playedSound = false;
   }
 
+  // -------------------------------------------------------------- grenades
+
+  /** Fireball, fragments, dust and a ground shockwave. */
+  spawnExplosion(position: THREE.Vector3, radius = 8, groundY = 0.05): void {
+    const scale = this.particleScale;
+
+    // Core fireball.
+    const fireCount = Math.round(46 * scale);
+    for (let i = 0; i < fireCount; i++) {
+      this.tmpVec
+        .set(randRange(-1, 1), randRange(-0.35, 1), randRange(-1, 1))
+        .normalize()
+        .multiplyScalar(randRange(2, 16));
+      this.sparks.spawn({
+        position: position.clone(),
+        velocity: this.tmpVec.clone(),
+        color: new THREE.Color(0xfff0b0),
+        endColor: new THREE.Color(0xb02800),
+        size: randRange(3, 8),
+        endScale: 2.4,
+        life: randRange(0.16, 0.5),
+        gravity: 2,
+        drag: 0.08,
+        alpha: 1,
+      });
+    }
+
+    // Fragments thrown outward along the ground.
+    const fragCount = Math.round(38 * scale);
+    for (let i = 0; i < fragCount; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const speed = randRange(9, 34);
+      this.tmpVec.set(Math.cos(a) * speed, randRange(1, 14), Math.sin(a) * speed);
+      this.sparks.spawn({
+        position: position.clone(),
+        velocity: this.tmpVec.clone(),
+        color: new THREE.Color(0xffd48a),
+        endColor: this.colorSparkEnd,
+        size: randRange(0.5, 1.4),
+        endScale: 0.2,
+        life: randRange(0.3, 0.95),
+        gravity: -18,
+        drag: 0.35,
+        alpha: 1,
+        collideGround: true,
+        groundY,
+        restitution: 0.3,
+      });
+    }
+
+    // Rolling smoke and dust.
+    const smokeCount = Math.round(30 * scale);
+    for (let i = 0; i < smokeCount; i++) {
+      this.tmpVec
+        .set(randRange(-1, 1), randRange(0, 0.9), randRange(-1, 1))
+        .normalize()
+        .multiplyScalar(randRange(1.5, 8));
+      this.smoke.spawn({
+        position: position.clone().add(
+          this.tmpVec2.set(randRange(-0.6, 0.6), randRange(0, 0.8), randRange(-0.6, 0.6)),
+        ),
+        velocity: this.tmpVec.clone(),
+        color: new THREE.Color(0x6a625c),
+        endColor: new THREE.Color(0x35322f),
+        size: randRange(3, 6),
+        endScale: 3.5,
+        life: randRange(1.4, 3.4),
+        gravity: 0.5,
+        drag: 0.35,
+        alpha: randRange(0.35, 0.6),
+        spin: randRange(-1.4, 1.4),
+      });
+    }
+
+    // Debris kicked off the ground.
+    const debrisCount = Math.round(16 * scale);
+    for (let i = 0; i < debrisCount; i++) {
+      const a = Math.random() * Math.PI * 2;
+      this.smoke.spawn({
+        position: position.clone(),
+        velocity: this.tmpVec
+          .set(Math.cos(a) * randRange(2, 9), randRange(4, 12), Math.sin(a) * randRange(2, 9))
+          .clone(),
+        color: new THREE.Color(0x585048),
+        size: randRange(0.08, 0.22),
+        endScale: 1,
+        life: randRange(0.9, 1.9),
+        gravity: -16,
+        drag: 0.7,
+        alpha: 1,
+        spin: randRange(-9, 9),
+        collideGround: true,
+        groundY,
+        restitution: 0.25,
+      });
+    }
+
+    this.spawnShockwave(position, radius, groundY);
+    this.spawnBlastLight(position, 0xffa044, 420, 0.4);
+  }
+
+  /** The bright bang of a stun grenade: white core, no debris. */
+  spawnFlashBurst(position: THREE.Vector3): void {
+    const scale = this.particleScale;
+    const count = Math.round(40 * scale);
+    for (let i = 0; i < count; i++) {
+      this.tmpVec
+        .set(randRange(-1, 1), randRange(-1, 1), randRange(-1, 1))
+        .normalize()
+        .multiplyScalar(randRange(6, 30));
+      this.sparks.spawn({
+        position: position.clone(),
+        velocity: this.tmpVec.clone(),
+        color: new THREE.Color(0xffffff),
+        endColor: new THREE.Color(0x9fd8ff),
+        size: randRange(1.5, 5),
+        endScale: 0.4,
+        life: randRange(0.1, 0.35),
+        gravity: -3,
+        drag: 0.1,
+        alpha: 1,
+      });
+    }
+    this.spawnBlastLight(position, 0xf2f6ff, 900, 0.3);
+    this.spawnShockwave(position, 5, position.y - 0.4, 0xdff0ff);
+  }
+
+  /** Starts a screening smoke cloud that keeps emitting for its full duration. */
+  spawnSmokeCloud(position: THREE.Vector3, radius: number, duration: number): void {
+    this.smokeClouds.push({
+      position: position.clone(),
+      radius,
+      life: duration,
+      maxLife: duration,
+      accumulator: 0,
+    });
+    // Initial burst so the cloud appears immediately rather than growing in.
+    for (let i = 0; i < Math.round(26 * this.particleScale); i++) {
+      this.emitSmokePuff(position, radius, 1);
+    }
+    this.spawnBlastLight(position, 0xdfe6ee, 40, 0.2);
+  }
+
+  private emitSmokePuff(origin: THREE.Vector3, radius: number, strength: number): void {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * radius * 0.55;
+    this.tmpVec2.set(
+      origin.x + Math.cos(a) * r,
+      origin.y + randRange(0, 0.5),
+      origin.z + Math.sin(a) * r,
+    );
+    this.tmpVec.set(Math.cos(a) * randRange(0.2, 1.1), randRange(0.5, 1.6), Math.sin(a) * randRange(0.2, 1.1));
+    this.smoke.spawn({
+      position: this.tmpVec2.clone(),
+      velocity: this.tmpVec.clone(),
+      color: new THREE.Color(0xd8dbd6),
+      endColor: new THREE.Color(0x9aa09a),
+      size: randRange(4, 7.5) * strength,
+      endScale: 2.2,
+      life: randRange(5, 9),
+      gravity: 0.12,
+      drag: 0.45,
+      alpha: randRange(0.4, 0.62),
+      spin: randRange(-0.5, 0.5),
+    });
+  }
+
+  private spawnShockwave(
+    position: THREE.Vector3,
+    radius: number,
+    groundY: number,
+    colour = 0xffd9a0,
+  ): void {
+    const wave = this.shockwaves.find((w) => w.life <= 0) ?? this.shockwaves[0];
+    wave.mesh.position.set(position.x, Math.max(groundY + 0.03, position.y - 0.6), position.z);
+    wave.mesh.visible = true;
+    wave.life = 0.5;
+    wave.maxLife = 0.5;
+    wave.maxRadius = radius;
+    (wave.mesh.material as THREE.MeshBasicMaterial).color.setHex(colour);
+  }
+
+  private spawnBlastLight(
+    position: THREE.Vector3,
+    colour: number,
+    peak: number,
+    duration: number,
+  ): void {
+    const entry = this.blastLights.find((b) => b.life <= 0) ?? this.blastLights[0];
+    entry.light.position.copy(position);
+    entry.light.color.setHex(colour);
+    entry.light.distance = 40;
+    entry.light.visible = true;
+    entry.peak = this.dynamicMuzzleLight ? peak : peak * 0.4;
+    entry.life = duration;
+    entry.maxLife = duration;
+  }
+
   // ---------------------------------------------------------------- update
 
   update(dt: number, camera: THREE.Camera): void {
@@ -521,6 +779,57 @@ export class EffectsSystem {
     this.updateDecals(dt);
     this.updateShells(dt);
     this.updateFlashes(dt, camera);
+    this.updateSmokeClouds(dt);
+    this.updateShockwaves(dt);
+    this.updateBlastLights(dt);
+  }
+
+  private updateSmokeClouds(dt: number): void {
+    for (let i = this.smokeClouds.length - 1; i >= 0; i--) {
+      const cloud = this.smokeClouds[i];
+      cloud.life -= dt;
+      if (cloud.life <= 0) {
+        this.smokeClouds.splice(i, 1);
+        continue;
+      }
+      // Thin the emission out as the canister burns down.
+      const t = cloud.life / cloud.maxLife;
+      const rate = 26 * this.particleScale * Math.min(1, t * 1.6 + 0.25);
+      cloud.accumulator += rate * dt;
+      while (cloud.accumulator >= 1) {
+        cloud.accumulator -= 1;
+        this.emitSmokePuff(cloud.position, cloud.radius, 0.85 + t * 0.35);
+      }
+    }
+  }
+
+  private updateShockwaves(dt: number): void {
+    for (const w of this.shockwaves) {
+      if (w.life <= 0) continue;
+      w.life -= dt;
+      if (w.life <= 0) {
+        w.mesh.visible = false;
+        continue;
+      }
+      const t = 1 - w.life / w.maxLife;
+      const scale = 0.4 + t * w.maxRadius;
+      w.mesh.scale.set(scale, 1, scale);
+      (w.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.7;
+    }
+  }
+
+  private updateBlastLights(dt: number): void {
+    for (const b of this.blastLights) {
+      if (b.life <= 0) continue;
+      b.life -= dt;
+      if (b.life <= 0) {
+        b.light.intensity = 0;
+        b.light.visible = false;
+        continue;
+      }
+      const t = b.life / b.maxLife;
+      b.light.intensity = b.peak * t * t;
+    }
   }
 
   private updateTracers(dt: number): void {
@@ -663,6 +972,16 @@ export class EffectsSystem {
       f.group.visible = false;
       f.light.intensity = 0;
     }
+    for (const w of this.shockwaves) {
+      w.life = 0;
+      w.mesh.visible = false;
+    }
+    for (const b of this.blastLights) {
+      b.life = 0;
+      b.light.intensity = 0;
+      b.light.visible = false;
+    }
+    this.smokeClouds.length = 0;
   }
 
   setPixelRatio(ratio: number): void {

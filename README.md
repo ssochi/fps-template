@@ -2,10 +2,10 @@
 
 A complete, batteries-included first/third person shooter template built with **Three.js + TypeScript + Vite**.
 
-It ships with a full shooting range, five distinct weapons, first *and* third person cameras, procedural
-weapon models, procedural character animation with IK, a pooled effects system, and a synthesized audio
-engine — **with zero binary assets**. Everything (textures, models, sounds) is generated at runtime, so the
-repo clones and runs instantly and works offline.
+It ships with a full shooting range, **ten distinct weapons**, **frag / smoke / flash grenades**, first
+*and* third person cameras, procedural weapon models, procedural character animation with IK, a pooled
+effects system, and a synthesized audio engine — **with zero binary assets**. Everything (textures,
+models, sounds) is generated at runtime, so the repo clones and runs instantly and works offline.
 
 > 中文文档见 [README.zh-CN.md](README.zh-CN.md)
 
@@ -40,15 +40,18 @@ Requires Node 20.19+ / 22.12+.
 | `Mouse 1` | Fire |
 | `Mouse 2` | Aim down sights (hold or toggle) |
 | `R` | Reload |
-| `1` – `5` | Select weapon |
+| `1` – `9`, `0` | Select weapon |
 | `Q` | Swap to previous weapon |
 | `Mouse wheel` | Cycle weapons |
 | `B` | Toggle fire mode (auto / burst / semi) |
+| `G` | Throw grenade — hold to cook a frag, release to throw |
+| `G` + `Mouse 2` | Underhand lob |
+| `T` | Cycle grenade type (frag → smoke → flash) |
 | `V` | Switch first ↔ third person |
 | `F` | Inspect weapon |
-| `E` | Interact — resupply ammo, take a weapon from a pedestal |
-| `T` | Reset all targets |
-| `G` | Start / cancel the timed drill |
+| `E` | Interact — resupply ammo and grenades, take a weapon from a pedestal |
+| `K` | Start / cancel the timed drill |
+| `L` | Reset all targets |
 | `H` | Toggle HUD |
 | `P` | Toggle collision debug wireframes |
 | `Esc` | Pause / settings |
@@ -75,15 +78,20 @@ Requires Node 20.19+ / 22.12+.
   purely cosmetic motion (bob, shake, lean) never affects where rounds land.
 
 ### Weapons
-Five weapons, each with its own handling, recoil signature, audio profile and reload style:
+Ten weapons, each with its own handling, recoil signature, audio profile and reload style:
 
 | Slot | Weapon | Notes |
 | --- | --- | --- |
 | 1 | M9 Sidearm | Semi-auto pistol, fast draw, forgiving recoil |
-| 2 | MP-9 Vector | 950 RPM SMG, auto/semi, low recoil, poor range |
-| 3 | AR-15 Carbine | Auto/burst/semi, red-dot optic, learnable recoil pattern |
-| 4 | M40 Marksman | Bolt-action, scoped optics with a mil-dot reticle, one-shot lethal |
-| 5 | M870 Breacher | Pump-action, 9-pellet buckshot, shell-by-shell reload you can interrupt to fire |
+| 2 | TMP-18 Machine Pistol | 1200 RPM full-auto sidearm, 20 rounds, brutal bloom |
+| 3 | Model 29 Magnum | Six-shot revolver, hand-cannon damage, heavy recoil |
+| 4 | MP-9 Vector | 950 RPM SMG, auto/semi, low recoil, poor range |
+| 5 | AR-15 Carbine | Auto/burst/semi, red-dot optic, learnable recoil pattern |
+| 6 | SR-25 Marksman | Scoped semi-auto DMR, 20 rounds, punches through cover |
+| 7 | M40 Marksman | Bolt-action, mil-dot scope, one-shot lethal |
+| 8 | M249 Support | Belt-fed 100 rounds, suppressive fire, six-second reload |
+| 9 | M870 Breacher | Pump-action, 9-pellet buckshot, interruptible shell-by-shell reload |
+| 0 | AA-12 Sweeper | Fully automatic drum-fed buckshot |
 
 Systems behind them:
 - Hitscan ballistics with per-weapon damage falloff, hit zones (head / body / limb), and **material
@@ -95,11 +103,26 @@ Systems behind them:
 - Fire modes, burst fire that completes after trigger release, bolt/pump cycle lockouts, tactical vs.
   empty reloads, dry fire, draw/holster, weapon inspect.
 
+### Throwables
+Three grenades on a shared throw key, with physics projectiles that bounce off the world:
+
+- **M67 Frag** — three-second fuse you can *cook* by holding the throw key; the timer starts when the pin
+  comes out, and holding it too long detonates in your hand. Radial damage with falloff and a line-of-sight
+  check, so cover actually protects.
+- **M18 Smoke** — pops on its fuse and screens the lane for twenty seconds with a continuously emitting
+  particle cloud dense enough to hide behind.
+- **M84 Stun** — flash blindness scaled by distance, line of sight *and* whether you were looking at it,
+  plus real hearing loss: the whole audio graph drops behind a lowpass with a tinnitus ring over the top.
+
+Tap `G` for an overhand throw; hold `Mouse 2` as well for an underhand lob into cover.
+
 ### Effects
 - Muzzle flashes (separate view-model and world versions so nothing doubles up), dynamic muzzle lights,
   travelling tracers, spent brass with bounce physics and impact audio.
 - Material-aware impacts: sparks, dust, smoke and debris chunks tuned per surface.
 - Bullet-hole decals oriented to the hit surface, pooled with a fade-out recycle.
+- Explosions: fireball, fragments, rolling smoke, ground debris, an expanding shockwave ring and a
+  blast light bright enough to relight the whole bay.
 - A single-draw-call GPU particle system (CPU simulated, free-list pooled) for sparks and smoke.
 
 ### Audio
@@ -112,10 +135,23 @@ never melt the audio graph.
 ### The range
 - Five lanes: close-quarters steel, a pistol/SMG progression with a penetration demo, a centre precision
   lane with a clear alley to a 100 m gong, a moving-target lane, and a long-range lane out to 150 m.
-- Six target types: paper bullseyes with 10-ring scoring, humanoid silhouettes with a head zone, swinging
-  steel plates, knock-down poppers that auto-reset, rail-mounted movers, and long-range gongs.
-- Weapon pedestals, an ammo resupply crate, distance markers, cover props and a covered firing line.
-- Scoring, live accuracy, and a timed drill (`G`) with a persisted personal best.
+- Six target types: paper bullseyes with 10-ring scoring, humanoid silhouettes that absorb damage and
+  **topple backwards under gravity before springing upright again**, swinging steel plates, knock-down
+  poppers, rail-mounted movers, and long-range gongs.
+- Ten weapon pedestals, an ammo resupply crate, distance markers, cover props and a covered firing line.
+- Scoring, live accuracy, and a timed drill (`K`) with a persisted personal best.
+
+### Scene and lighting
+No ray tracing — everything is conventional forward rendering, tuned so the space reads as a real place:
+- Sun placed *behind* the firing line so the shooter never stares into it, plus hemisphere, ambient and a
+  bounce light standing in for the concrete pad.
+- Four strong overhead lamps carry the covered bay, with a second bank on the higher presets; the dozens
+  of emissive strip fixtures above them are geometry, not lights.
+- Additive light shafts under the fixtures and GPU-animated dust motes drifting through the bay.
+- Dense scenery: roof trusses, corrugated decking, cable trays and conduit, a glazed range-control booth,
+  wall posters, benches with kit laid out, brass buckets, a tool cart, ammo crates, sandbags, Jersey
+  barriers, tyre stacks, pallets, drums, cones, a derelict vehicle hulk, a perimeter chain-link fence,
+  a treeline and a distant ridge line.
 
 ### UI
 - DOM HUD: a dynamic crosshair whose gap is derived from the *actual* spread cone in screen pixels,
@@ -148,11 +184,13 @@ src/
 │   └── CharacterModel.ts       Third-person humanoid, walk cycle, two-bone IK arms
 ├── weapons/
 │   ├── WeaponTypes.ts          The config schema — every tunable lives here
-│   ├── WeaponConfigs.ts        The five weapons' balance data
+│   ├── WeaponConfigs.ts        The ten weapons' balance data
 │   ├── WeaponMeshes.ts         Procedural weapon geometry + named anchors
-│   └── WeaponSystem.ts         Loadout, firing state machine, spread, recoil, ballistics
+│   ├── WeaponSystem.ts         Loadout, firing state machine, spread, recoil, ballistics
+│   ├── ThrowableConfigs.ts     Grenade data + procedural grenade models
+│   └── ThrowableSystem.ts      Cook/throw state machine, projectile physics
 ├── fx/
-│   ├── EffectsSystem.ts        Flashes, tracers, impacts, decals, brass
+│   ├── EffectsSystem.ts        Flashes, tracers, impacts, decals, brass, explosions
 │   └── ParticleSystem.ts       Pooled GPU point particles
 ├── audio/
 │   └── AudioEngine.ts          Fully procedural WebAudio sound
@@ -160,6 +198,7 @@ src/
 │   ├── ShootingRange.ts        Level construction, lighting, collision registration
 │   ├── Targets.ts              Reactive range targets and scoring
 │   ├── RangeSession.ts         Score, accuracy, timed drill
+│   ├── GeometryMerge.ts        Static batching so scenery density stays cheap
 │   └── Materials.ts            Procedural textures and shared materials
 └── ui/
     ├── HUD.ts                  In-game overlay
@@ -181,7 +220,14 @@ src/
    `charging`, `scopeLens`).
 
 Nothing else needs to change: the view model derives its hip depth and ADS pose from the model's bounds
-and its `sight` anchor, and the third-person character IKs both hands onto `gripAnchor` / `foreAnchor`.
+and its `sight` anchor, the third-person character IKs both hands onto `gripAnchor` / `foreAnchor`, and the
+HUD, pedestals and slot keys all read `WEAPON_ORDER`.
+
+### Add a throwable
+
+Add an id to `ThrowableId` and a config to `THROWABLE_CONFIGS` in
+`src/weapons/ThrowableConfigs.ts`, extend `buildThrowable()` with its model, then handle the new payload
+in `Game.onDetonate()`. The cook/throw state machine, physics and HUD are payload-agnostic.
 
 ### Use real art instead of primitives
 
@@ -232,11 +278,18 @@ so the crosshair stays honest without letting you shoot from behind cover.
 **Frame ordering.** Input → player physics → camera → weapons → view model / character → FX → HUD. The
 camera is placed *before* the weapons run so a shot fired this frame uses this frame's aim.
 
-**Performance.** ~800 draw calls and ~100k triangles with everything on screen, which is comfortable on
-any discrete GPU or modern integrated one. If you need more headroom: drop the quality preset (disables
-bloom, SMAA, shadows and the roof point lights, and halves particle counts), or merge the static level
-geometry per material with `BufferGeometryUtils.mergeGeometries` — most of the draw calls are small
-static props and the pedestal display weapons.
+**Static batching.** The level is authored as hundreds of small primitives, then merged per material into
+a couple of dozen meshes by `StaticBatcher` before the first frame. The surface tag is part of the batch
+key so a merged mesh still reports the right material for impact effects and footsteps, and front-face-only
+raycasting means a round entering a solid box never registers a second hit on the way out — so penetration
+is unaffected. Target furniture and the pedestal display weapons go through the same path. Without it the
+prop density above would cost well over two thousand draw calls.
+
+**Performance.** ~550-700 draw calls and ~190k triangles with the whole bay on screen, comfortable on any
+discrete GPU or modern integrated one. Lighting is deliberately restrained — a forward renderer pays for
+every light on every lit pixel, so the bay is lit by four strong lamps rather than one per fixture. If you
+need more headroom, drop the quality preset: it disables bloom, SMAA, shadows, the second lamp bank and
+the atmospherics, and halves particle counts.
 
 ---
 
