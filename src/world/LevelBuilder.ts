@@ -31,7 +31,7 @@ import { randRange } from '../core/MathUtils';
 
 export type SurfaceTag = 'concrete' | 'metal' | 'dirt' | 'wood';
 
-export type LevelId = 'range' | 'circuit';
+export type LevelId = 'range' | 'circuit' | 'studio';
 
 export interface BoxOptions {
   /** Register an AABB with the collision world. */
@@ -87,6 +87,15 @@ export interface LapCourse {
   checkpoints: { position: THREE.Vector3; radius: number }[];
 }
 
+/** Something the player can walk up to and use with the interact key. */
+export interface LevelInteractable {
+  position: THREE.Vector3;
+  radius: number;
+  /** Evaluated per frame, so a toggle can relabel itself. */
+  label: () => string;
+  activate: () => void;
+}
+
 export interface LevelBuildResult {
   id: LevelId;
   name: string;
@@ -100,10 +109,20 @@ export interface LevelBuildResult {
   vehicles: VehicleSpawn[];
   /** Lap timing geometry, or null on maps with no circuit. */
   lapCourse: LapCourse | null;
+  /** Props the interact key can operate. */
+  interactables?: LevelInteractable[];
+  /**
+   * A scene prefiltered into an environment map for image-based lighting.
+   * Physical material features — clearcoat, sheen, anisotropy, transmission —
+   * are reflection effects and read as flat shading without one.
+   */
+  environmentScene?: THREE.Scene | null;
+  environmentIntensity?: number;
   spawnPoint: THREE.Vector3;
   spawnYaw: number;
   sun: THREE.DirectionalLight;
-  sky: Sky;
+  /** Null on interior levels, which have no sky dome. */
+  sky: Sky | null;
   /** Lights and effects disabled on the lower quality presets. */
   optionalLights: THREE.Light[];
   atmospherics: THREE.Object3D[];
@@ -124,6 +143,11 @@ export interface LevelDescriptor {
 export const LEVELS: readonly LevelDescriptor[] = [
   { id: 'range', name: 'Shooting Range', blurb: 'Covered firing line, 10 lanes of targets out to 150 m.' },
   { id: 'circuit', name: 'Circuit & Garage', blurb: 'Race track and pit lane, with three drivable vehicles in the garage.' },
+  {
+    id: 'studio',
+    name: 'Model Studio',
+    blurb: 'PBR test scene: studio rig, reference charts and three showpieces.',
+  },
 ];
 
 export interface DustFieldOptions {

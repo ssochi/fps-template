@@ -6,7 +6,14 @@ import { clamp } from './MathUtils';
 import { CollisionWorld } from '../physics/CollisionWorld';
 import { ShootingRange } from '../world/ShootingRange';
 import { RaceTrack } from '../world/RaceTrack';
-import { LEVELS, mergeDisplayModel, type LevelBuildResult, type LevelId } from '../world/LevelBuilder';
+import { StudioLevel } from '../world/StudioLevel';
+import {
+  LEVELS,
+  mergeDisplayModel,
+  type LevelBuildResult,
+  type LevelId,
+  type LevelInteractable,
+} from '../world/LevelBuilder';
 import { RangeSession } from '../world/RangeSession';
 import type { RangeTarget, TargetEvent } from '../world/Targets';
 import { Player, type PlayerInputState } from '../player/Player';
@@ -94,8 +101,9 @@ export class Game {
   private collisionDebug: THREE.Object3D | null = null;
   /** Level geometry plus the vehicle group; rebuilt on every level load. */
   private raycastTargets: THREE.Object3D[] = [];
-  private interactTarget: 'ammo' | 'vehicle' | WeaponId | null = null;
+  private interactTarget: 'ammo' | 'vehicle' | 'prop' | WeaponId | null = null;
   private interactVehicle: VehicleInstance | null = null;
+  private interactProp: LevelInteractable | null = null;
   /** Sits in the driver's seat rather than on the boom. */
   private cockpitView = false;
 
@@ -279,6 +287,10 @@ export class Game {
     this.input = new Input(this.pipeline.canvas);
     this.input.onPointerLockChange((locked) => this.onPointerLockChange(locked));
 
+    this.pipeline.setEnvironment(
+      this.level.environmentScene ?? null,
+      this.level.environmentIntensity ?? 1,
+    );
     this.applySettings();
     window.addEventListener('resize', this.handleResize);
     this.handleResize();
@@ -345,7 +357,12 @@ export class Game {
 
   /** Builds a level and wires everything that points at level content. */
   private buildLevel(id: LevelId): void {
-    const builder = id === 'circuit' ? new RaceTrack(this.collision) : new ShootingRange(this.collision);
+    const builder =
+      id === 'circuit'
+        ? new RaceTrack(this.collision)
+        : id === 'studio'
+          ? new StudioLevel(this.collision)
+          : new ShootingRange(this.collision);
     this.level = builder.build();
     this.scene.add(this.level.root);
     this.scene.background = this.level.background;
@@ -360,6 +377,12 @@ export class Game {
     this.vehicles.spawnAll(this.level.vehicles);
     this.lapTimer = this.level.lapCourse ? new LapTimer(this.level.lapCourse) : null;
     this.raycastTargets = [...this.level.collidables, this.vehicles.group];
+    // The pipeline does not exist yet on the very first build; the constructor
+    // applies the environment once it does.
+    this.pipeline?.setEnvironment(
+      this.level.environmentScene ?? null,
+      this.level.environmentIntensity ?? 1,
+    );
   }
 
   /**
@@ -981,6 +1004,7 @@ export class Game {
   private updateInteractions(): void {
     this.interactTarget = null;
     this.interactVehicle = null;
+    this.interactProp = null;
     let closest = Infinity;
 
     // Vehicles win over everything else within reach — walking past a car to
@@ -993,12 +1017,25 @@ export class Game {
 
     for (const pickup of this.level.pickups) {
       const d = this.player.position.distanceTo(pickup.position);
-      if (d < pickup.radius && d < closest && !this.interactVehicle) {
+      if (d < pickup.radius && d < closest && !this.interactVehicle && !this.interactProp) {
         closest = d;
         this.interactTarget = pickup.id;
       }
     }
+    // Level props — the fridge doors in the studio — sit between vehicles and
+    // pickups in priority: closer than a plinth, but never over a vehicle.
     if (!this.interactVehicle) {
+      for (const prop of this.level.interactables ?? []) {
+        const d = this.player.position.distanceTo(prop.position);
+        if (d < prop.radius && d < closest) {
+          closest = d;
+          this.interactProp = prop;
+          this.interactTarget = 'prop';
+        }
+      }
+    }
+
+    if (!this.interactVehicle && !this.interactProp) {
       for (const crate of this.level.ammoCrates) {
         if (this.player.position.distanceTo(crate.position) < crate.radius) {
           this.interactTarget = 'ammo';
@@ -1010,6 +1047,9 @@ export class Game {
     if (this.interactTarget && this.input.wasPressed('KeyE')) {
       if (this.interactTarget === 'vehicle') {
         if (this.interactVehicle) this.enterVehicle(this.interactVehicle);
+      } else if (this.interactTarget === 'prop') {
+        this.interactProp?.activate();
+        this.audio.playUi('confirm');
       } else if (this.interactTarget === 'ammo') {
         this.weapons.refillAll();
         this.throwables.refill();
@@ -1342,10 +1382,13 @@ export class Game {
     } else if (this.interactTarget === 'vehicle' && this.interactVehicle) {
       prompt = `Drive ${this.interactVehicle.config.name}`;
       promptKey = 'E';
+    } else if (this.interactTarget === 'prop' && this.interactProp) {
+      prompt = this.interactProp.label();
+      promptKey = 'E';
     } else if (this.interactTarget === 'ammo') {
       prompt = 'Resupply ammunition';
       promptKey = 'E';
-    } else if (this.interactTarget && this.interactTarget !== 'vehicle') {
+    } else if (this.interactTarget && this.interactTarget !== 'vehicle' && this.interactTarget !== 'prop') {
       prompt = `Take ${WEAPON_CONFIGS[this.interactTarget].name}`;
       promptKey = 'E';
     }

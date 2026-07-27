@@ -43,7 +43,7 @@ const CONTROLS: ControlEntry[] = [
   { keys: ['T'], action: 'Cycle grenade type' },
   { keys: ['V'], action: 'First / third person' },
   { keys: ['F'], action: 'Inspect weapon' },
-  { keys: ['E'], action: 'Interact / resupply' },
+  { keys: ['E'], action: 'Interact — resupply, pick up, open the fridge' },
   { keys: ['K'], action: 'Start timed drill' },
   { keys: ['L'], action: 'Reset targets' },
   { keys: ['M'], action: 'Next map' },
@@ -125,10 +125,11 @@ export class Menu {
         <div class="screen__inner">
           <h1>Three.js FPS Template</h1>
           <p class="subtitle">
-            First / third person shooter sandbox — ten weapons, three throwables, and two maps:
-            a full shooting range, and a race circuit whose garage holds a hypercar, a 4x4 and a tank —
+            First / third person shooter sandbox — ten weapons, three throwables, and three maps:
+            a full shooting range; a race circuit whose garage holds a hypercar, a 4x4 and a tank —
             all three drivable with lap timing and a working 120 mm gun on the tank — plus a pilotable
-            Terran assault mech that walks, twists its torso and fires twin arm cannons.
+            Terran assault mech that walks, twists its torso and fires twin arm cannons; and a model
+            studio, a PBR test scene with an area-light rig, reference charts and three showpieces.
           </p>
 
           <h2>Controls</h2>

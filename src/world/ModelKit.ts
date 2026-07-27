@@ -83,10 +83,21 @@ export interface Section {
   halfWidth: number;
   bottom: number;
   top: number;
+  /**
+   * Corner cut, in metres. Zero keeps the plain rectangle every gameplay
+   * vehicle is built from; a positive value turns the section into a decagon
+   * with a defined shoulder, which is what makes a body read as sculpted
+   * rather than as a slab with the corners left square.
+   */
+  chamfer?: number;
+  /** Half-width at the top edge. Defaults to `halfWidth`; less gives tumblehome. */
+  topHalfWidth?: number;
+  /** Half-width at the sill. Defaults to `halfWidth`. */
+  bottomHalfWidth?: number;
 }
 
 /**
- * Skins a run of rectangular cross-sections into a closed hull.
+ * Skins a run of cross-sections into a closed hull.
  *
  * Triangles are emitted un-indexed so `computeVertexNormals` gives flat,
  * per-facet shading — which is exactly the faceted panel look the rest of the
@@ -96,12 +107,55 @@ export function loft(sections: Section[]): THREE.BufferGeometry {
   const positions: number[] = [];
   const uvs: number[] = [];
 
-  const corners = (s: Section): THREE.Vector3[] => [
-    new THREE.Vector3(-s.halfWidth, s.bottom, s.z),
-    new THREE.Vector3(s.halfWidth, s.bottom, s.z),
-    new THREE.Vector3(s.halfWidth, s.top, s.z),
-    new THREE.Vector3(-s.halfWidth, s.top, s.z),
-  ];
+  // The ring is walked anticlockwise seen from -Z, starting at the bottom
+  // left. A plain rectangle is emitted verbatim so existing hulls are
+  // untouched; anything else expands to a shouldered decagon.
+  const corners = (s: Section): THREE.Vector3[] => {
+    const hw = s.halfWidth;
+    const bw = s.bottomHalfWidth ?? hw;
+    const tw = s.topHalfWidth ?? hw;
+    // A chamfer larger than the section collapses the shoulder, the waist and
+    // the sill onto one line: the ring keeps its ten points but three of them
+    // coincide, and the degenerate triangles between them get whatever normal
+    // floating-point noise hands out. Clamp instead of trusting the caller.
+    const raw = s.chamfer ?? 0;
+    const c = Math.max(0, Math.min(raw, (s.top - s.bottom) * 0.4, Math.min(bw, tw) * 0.4));
+    const ring: [number, number][] =
+      c <= 0 && bw === hw && tw === hw
+        ? [
+            [-hw, s.bottom],
+            [hw, s.bottom],
+            [hw, s.top],
+            [-hw, s.top],
+          ]
+        : (() => {
+            const mid = (s.bottom + s.top) / 2;
+            return [
+              [-(bw - c), s.bottom],
+              [bw - c, s.bottom],
+              [bw, s.bottom + c],
+              [hw, mid],
+              [tw, s.top - c],
+              [tw - c, s.top],
+              [-(tw - c), s.top],
+              [-tw, s.top - c],
+              [-hw, mid],
+              [-bw, s.bottom + c],
+            ];
+          })();
+    return ring.map(([x, y]) => new THREE.Vector3(x, y, s.z));
+  };
+
+  const tri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3): void => {
+    for (const v of [a, b, c]) positions.push(v.x, v.y, v.z);
+    for (const [u, w] of [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+    ]) {
+      uvs.push(u, w);
+    }
+  };
 
   const quad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3): void => {
     for (const v of [a, b, c, a, c, d]) positions.push(v.x, v.y, v.z);
@@ -127,17 +181,37 @@ export function loft(sections: Section[]): THREE.BufferGeometry {
   for (let i = 0; i < sections.length - 1; i++) {
     const a = corners(sections[i]);
     const b = corners(sections[i + 1]);
-    quad(a[0], a[1], b[1], b[0]); // bottom
-    quad(a[1], a[2], b[2], b[1]); // right
-    quad(a[2], a[3], b[3], b[2]); // top
-    quad(a[3], a[0], b[0], b[3]); // left
+    for (let k = 0; k < a.length; k++) {
+      const n = (k + 1) % a.length;
+      quad(a[k], a[n], b[n], b[k]);
+    }
   }
 
   // End caps, wound outward.
-  const first = corners(sections[0]);
-  quad(first[0], first[3], first[2], first[1]);
-  const last = corners(sections[sections.length - 1]);
-  quad(last[0], last[1], last[2], last[3]);
+  //
+  // A rectangle fans safely from a corner, and does so here exactly as the
+  // rectangle-only version did, so no existing hull changes. A shouldered
+  // section is only near-convex — inset a sill and the chamfer point becomes
+  // reflex — and a corner fan then emits a back-facing sliver there. Fanning
+  // from the centroid is correct for any section the ring's middle can see.
+  const cap = (ring: THREE.Vector3[], outward: boolean): void => {
+    const n = ring.length;
+    if (n === 4) {
+      if (outward) for (let k = 1; k < 3; k++) tri(ring[0], ring[k], ring[k + 1]);
+      else for (let k = 2; k >= 1; k--) tri(ring[0], ring[k + 1], ring[k]);
+      return;
+    }
+    const mid = new THREE.Vector3();
+    for (const v of ring) mid.add(v);
+    mid.divideScalar(n);
+    for (let k = 0; k < n; k++) {
+      const j = (k + 1) % n;
+      if (outward) tri(mid, ring[k], ring[j]);
+      else tri(mid, ring[j], ring[k]);
+    }
+  };
+  cap(corners(sections[0]), false);
+  cap(corners(sections[sections.length - 1]), true);
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));

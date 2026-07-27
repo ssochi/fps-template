@@ -112,12 +112,14 @@ export class RenderPipeline {
   private viewModelPass: ViewModelPass | null = null;
   private outputPass: OutputPass | null = null;
 
-  private worldScene: THREE.Scene;
+  private readonly worldScene: THREE.Scene;
   private worldCamera: THREE.Camera;
   private vmScene: THREE.Scene;
   private vmCamera: THREE.Camera;
 
   private preset: QualityPreset = QUALITY_PRESETS.high;
+  private pmrem: THREE.PMREMGenerator | null = null;
+  private environment: THREE.Texture | null = null;
   private width = 1;
   private height = 1;
 
@@ -229,6 +231,28 @@ export class RenderPipeline {
     }
 
     this.composer = composer;
+  }
+
+  /**
+   * Prefilters a scene into an image-based lighting environment.
+   *
+   * `PMREMGenerator` builds the mip chain that lets a material sample the right
+   * blur for its roughness. Without this, `MeshPhysicalMaterial`'s clearcoat,
+   * sheen, anisotropy and transmission have nothing to reflect and read as flat
+   * shading no matter how good the textures are.
+   */
+  setEnvironment(source: THREE.Scene | null, intensity = 1): void {
+    this.environment?.dispose();
+    this.environment = null;
+    if (!source) {
+      this.worldScene.environment = null;
+      return;
+    }
+    this.pmrem ??= new THREE.PMREMGenerator(this.renderer);
+    this.pmrem.compileEquirectangularShader();
+    this.environment = this.pmrem.fromScene(source, 0.04).texture;
+    this.worldScene.environment = this.environment;
+    this.worldScene.environmentIntensity = intensity;
   }
 
   // ----------------------------------------------------------------- resize

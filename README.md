@@ -2,8 +2,9 @@
 
 A complete, batteries-included first/third person shooter template built with **Three.js + TypeScript + Vite**.
 
-It ships with **two maps** — a full shooting range, and a race circuit whose garage holds three heavily
-detailed **drivable** vehicles — plus **ten distinct weapons**, **frag / smoke / flash grenades**, first *and* third
+It ships with **three maps** — a full shooting range, a race circuit whose garage holds three heavily
+detailed **drivable** vehicles, and a model studio built to show how a PBR asset is actually authored —
+plus **ten distinct weapons**, **frag / smoke / flash grenades**, first *and* third
 person cameras, procedural weapon models, procedural character animation with IK, a pooled effects
 system, and a synthesized audio engine — **with zero binary assets**. Everything (textures, models,
 sounds) is generated at runtime, so the repo clones and runs instantly and works offline.
@@ -50,7 +51,7 @@ Requires Node 20.19+ / 22.12+.
 | `T` | Cycle grenade type (frag → smoke → flash) |
 | `V` | Switch first ↔ third person |
 | `F` | Inspect weapon |
-| `E` | Interact — resupply ammo and grenades, take a weapon from a pedestal |
+| `E` | Interact — resupply ammo and grenades, take a weapon from a pedestal, open the studio fridge |
 | `K` | Start / cancel the timed drill |
 | `L` | Reset all targets |
 | `M` | Next map (also selectable from the start and pause screens) |
@@ -149,7 +150,7 @@ never melt the audio graph.
 
 ### The maps
 
-Both maps are subclasses of `LevelBuilder`, share the same helpers (`box`, `prop`, `sign`,
+All three maps are subclasses of `LevelBuilder`, share the same helpers (`box`, `prop`, `sign`,
 `pedestalRow`, `buildDustField`, `buildSkyAndSun`) and are hot-swappable at runtime with `M` or from the
 menu. Swapping tears down the collision world, the score session and every level-owned GPU resource, then
 rebuilds — the player, weapons and HUD simply re-point.
@@ -183,7 +184,7 @@ rebuilds — the player, weapons and HUD simply re-point.
 
 `src/world/Thor.ts` builds a Terran heavy assault mech in the mould of StarCraft II's Thor, and it is
 pilotable: it walks, twists its torso to track your aim, and shoots. There is one on a marked hardstand on
-each map.
+the range and another on the circuit.
 
 The silhouette is what carries the design: a small head with a glowing visor sunk between enormous
 hazard-striped pauldrons, a deep slab-sided chest wearing the Terran skull-and-wings roundel, stubby arms
@@ -256,6 +257,36 @@ the dash.
 the world each step, and on impact it goes through the same explosion path as a frag grenade — blast
 falloff, line-of-sight checks and all. Reload is gated and shown on the dash.
 
+### The model studio
+
+A test scene for looking at models, built the way the industry builds one. Three showpieces on lit
+turntables, a reference wall to judge them against, and a texture inspector to diagnose them with.
+
+**The three showpieces.**
+- **Meridian GT-9**, a mid-engine supercar. Twelve lofted body sections with chamfered, tumblehome
+  cross-sections; metallic base coat under a `clearcoat` layer with its own near-zero roughness and a
+  sparse flake normal map; tinted transmissive glazing; carbon aero with `anisotropy`; ten-spoke painted
+  alloys over cross-drilled discs and red calipers; shut lines, arch flares, tyre sidewall lettering.
+- **Halden 3-seat sofa**. `sheen` upholstery over a procedural weave, button tufting, welt cord, top
+  stitching, and splayed oiled-walnut legs with brass ferrules.
+- **Coldline CF-90 fridge**, which **opens** — walk up and press `E`. Both doors swing on their real
+  hinge lines, the freezer drawer slides, the interior lamp fades up, and inside there are glass shelves,
+  crispers, door bins and groceries. Anisotropic brushed steel outside.
+
+**The rig.** Three `RectAreaLight` softboxes as key / fill / rim, each with its visible panel, frame and
+stand; a dim directional light purely to put contact shadows back (area lights cast none); optional
+practical spots over each plinth; and a coved cyclorama so there is no floor-to-wall seam.
+
+**The reference wall.** A nine-step roughness sweep at metalness 0 and another at metalness 1; a row of
+six balls each isolating one `MeshPhysicalMaterial` feature — clearcoat, sheen, anisotropy, iridescence,
+transmission, specular tint; an eleven-step greyscale wedge and an eight-patch colour checker for
+exposure and white balance; and a 1.8 m figure for scale.
+
+**The map inspector.** For each surface — carbon fibre, brushed steel, upholstery, walnut — its albedo,
+normal and packed ORM shown unlit and side by side, next to a sphere wearing the full set. This is the
+panel you actually diagnose a broken texture on: a roughness channel that has saturated to white, or a
+normal map that has been tagged as colour, is obvious here and invisible on the model.
+
 ### Scene and lighting
 No ray tracing — everything is conventional forward rendering, tuned so the space reads as a real place:
 - Sun placed *behind* the firing line so the shooter never stares into it, plus hemisphere, ambient and a
@@ -321,6 +352,9 @@ src/
 │   ├── VehicleMaterials.ts     Cached materials for the vehicles
 │   ├── Vehicles.ts             Lofted hypercar / 4x4 / tank models
 │   ├── Thor.ts                 Walking Terran assault mech
+│   ├── StudioLevel.ts          The model studio: light rig, reference charts, map inspector
+│   ├── Showpieces.ts           The three studio models: supercar, sofa, opening fridge
+│   ├── PbrSurface.ts           Procedural albedo / normal / packed-ORM surface authoring
 │   ├── Targets.ts              Reactive range targets and scoring
 │   ├── RangeSession.ts         Score, accuracy, timed drill
 │   ├── GeometryMerge.ts        Static batching so scenery density stays cheap
@@ -462,9 +496,50 @@ world offset while its shadow target sits a hundred metres away silently flatten
 `buildSkyAndSun` places the sun *relative to its target*, which is why a level can ask for a 46 degree sun
 and get one.
 
+**PBR authoring.** `PbrSurface` generates metallic-roughness sets on a canvas — albedo in sRGB, a
+tangent-space normal derived from a height field by central differences, and **occlusion, roughness and
+metalness packed into the R, G and B channels of one texture**. That packing is the glTF convention and
+three.js reads exactly those channels (`aomap_fragment` takes `.r`, `roughnessmap_fragment` `.g`,
+`metalnessmap_fragment` `.b`), so one sample and one upload serve all three maps. The map factors
+*multiply* the material scalars, which is why `applySurface` sets `roughness = metalness = 1` — leaving
+them at their defaults silently halves the metalness of every metal.
+
+Three things that are easy to get wrong and hard to see:
+
+- **Normal strength is not a taste knob.** It is the slope in height units per texel, and the central
+  difference already spans two texels. A value of 10 asks for an 83 degree facet on every thread of a
+  weave — carbon that renders as a mirrorball. Calibrate against the real feature size.
+- **Stacked semi-transparent strokes are a one-way ratchet.** Painting a channel by laying down many
+  white scratches at low alpha drives it to white whatever the base was; brushed steel authored that way
+  came out at roughness 0.9. Draw half the scratches dark so the mean stays where you put it.
+- **Data maps are not colour maps.** Normal and ORM textures must be linear on the material. The
+  inspector deliberately does the opposite and tags its previews sRGB, because there the goal is to show
+  the bytes: the shader decodes and the output pass re-encodes, so the texel survives the round trip.
+
+**Image-based lighting.** `PMREMGenerator.fromScene(new RoomEnvironment())` prefilters a studio interior
+into a radiance map with the mip chain that lets a material sample the right blur for its roughness.
+Clearcoat, sheen, anisotropy, iridescence and transmission are all reflection effects — without an
+environment they have nothing to reflect and collapse to flat shading however good the textures are.
+`RenderPipeline.setEnvironment` builds it per level and the level asks for its own intensity. Treat that
+intensity as a light: at 1.0 the studio's white-lined fridge interior renders past the bloom threshold
+with every lamp in the room switched off.
+
+**Exposure discipline in a bright room.** Post-processing runs before tone mapping, so *any* diffuse
+surface whose radiance passes bloom's 1.0 high-pass smears a veil over the whole frame — the same failure
+as the sky dome above, but from a white wall. A studio is mostly large pale surfaces, so its cyclorama is
+painted a mid grey, its rig is set by measurement rather than by eye, and its light panels are tone
+mapped. Turning the lights *up* past that point does not make the image brighter, only milkier.
+
+**Area lights point the other way.** `Object3D.lookAt` aims local **-Z** at the target for lights and
+cameras but local **+Z** for everything else, and a `RectAreaLight` emits along that same -Z. Copying a
+light's quaternion onto the plane that represents it therefore faces the lit side away from the subject
+and buries it behind its own frame. `RectAreaLight` also needs `RectAreaLightUniformsLib.init()`, only
+lights Standard and Physical materials, and casts no shadows at all.
+
 **Performance.** ~550-700 draw calls and ~190k triangles on the range; ~700-900 and ~600k on the circuit
 with the pit complex, all three vehicles and half the track in frame. Comfortable on any discrete GPU or a
-modern integrated one. Lighting is deliberately restrained — a forward renderer pays for every light on
+modern integrated one; ~700-1000 and ~290k in the studio, where the cost is materials rather than
+geometry. Lighting is deliberately restrained — a forward renderer pays for every light on
 every lit pixel, so the range bay is lit by four strong lamps rather than one per fixture, and the garage
 by two per bay. If you need more headroom, drop the quality preset: it disables bloom, SMAA, shadows, the
 second lamp bank, the floodlights and the atmospherics, and halves particle counts.
