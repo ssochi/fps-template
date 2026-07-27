@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Creature } from '../build/CreatureBuilder';
 import { solveTwoBone } from './IK';
 import { SpringVec } from '../core/MathUtils';
-import { clamp, damp, dampAngle, easeOutCubic, lerp, noise1 } from '../core/MathUtils';
+import { angleDelta, clamp, damp, dampAngle, easeOutCubic, noise1, wrapAngle } from '../core/MathUtils';
 
 /**
  * Procedural animation. There are no clips, no keyframes and no baked cycles;
@@ -130,30 +130,57 @@ export class Animator {
 
   // ------------------------------------------------------------------ steering
 
+  /**
+   * Wander, plus a fence that actually holds.
+   *
+   * The first version of this let creatures walk off the world — measured, five
+   * of eight left the thirty-metre ground entirely and one reached 550 m. Two
+   * separate mistakes, and the second is the interesting one:
+   *
+   * 1. The correction only began *at* the fence and ramped over the next few
+   *    metres, so at the moment it was needed its strength was zero.
+   * 2. It was written as `lerp(desiredHeading, inward, t)`. But
+   *    `desiredHeading` is a running sum with no bound, while `inward` comes
+   *    from `atan2` and lives in (-pi, pi]. Interpolating a raw number toward a
+   *    wrapped one is not a turn toward anything — once the sum had drifted a
+   *    few turns away, the "correction" pointed somewhere arbitrary. Angles
+   *    need `angleDelta`, and the sum needs wrapping.
+   *
+   * The fence now starts well inside the pen, fades the wander out as it takes
+   * over so the two are not fighting, and turns along the shortest arc.
+   */
   private steer(dt: number, walking: boolean): void {
     const motion = this.creature.genome.motion;
     const target = walking ? motion.speed : 0;
     this.speed = damp(this.speed, target, 3.2, dt);
 
     if (walking) {
+      const limit = this.options.bounds;
+      const dist = Math.hypot(this.position.x, this.position.z);
+      const soft = limit * 0.7;
+      const urgency = clamp((dist - soft) / Math.max(1e-3, limit - soft), 0, 1);
+
       // Smooth wander from value noise rather than random jumps, so the path
       // curves the way an animal's does instead of zig-zagging.
       this.wanderPhase += dt * motion.wander * 0.5;
-      this.desiredHeading += noise1(this.wanderPhase, this.creature.genome.seed) * dt * motion.wander * 2.4;
+      this.desiredHeading +=
+        noise1(this.wanderPhase, this.creature.genome.seed) *
+        dt *
+        motion.wander *
+        2.4 *
+        (1 - urgency);
 
-      // Turn back at the edge of the pen, steering rather than teleporting.
-      const limit = this.options.bounds;
-      const dist = Math.hypot(this.position.x, this.position.z);
-      if (dist > limit) {
+      if (urgency > 0) {
         const inward = Math.atan2(-this.position.x, -this.position.z);
-        const urgency = clamp((dist - limit) / (limit * 0.35), 0, 1);
-        this.desiredHeading = lerp(this.desiredHeading, inward, urgency * 0.12);
+        this.desiredHeading +=
+          angleDelta(this.desiredHeading, inward) * clamp(urgency * 5 * dt, 0, 1);
       }
+      this.desiredHeading = wrapAngle(this.desiredHeading);
     }
 
     const before = this.heading;
     this.heading = dampAngle(this.heading, this.desiredHeading, 2.4, dt);
-    this.turnRate = damp(this.turnRate, (this.heading - before) / Math.max(dt, 1e-4), 8, dt);
+    this.turnRate = damp(this.turnRate, angleDelta(before, this.heading) / Math.max(dt, 1e-4), 8, dt);
   }
 
   private driveRoot(dt: number): void {
@@ -161,6 +188,16 @@ export class Animator {
     this.position.x += Math.sin(this.heading) * move;
     this.position.z += Math.cos(this.heading) * move;
     this.distance += move;
+
+    // Backstop. The steering above should make this unreachable, but an
+    // invariant that only holds while the tuning is right is not an invariant.
+    const hard = this.options.bounds * 1.08;
+    const out = Math.hypot(this.position.x, this.position.z);
+    if (out > hard) {
+      const k = hard / out;
+      this.position.x *= k;
+      this.position.z *= k;
+    }
 
     const root = this.creature.root;
     root.position.copy(this.position);

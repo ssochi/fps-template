@@ -35,6 +35,13 @@ export function dampVec(
   current.z = target.z + (current.z - target.z) * k;
 }
 
+/** Folds an angle into (-pi, pi]. */
+export function wrapAngle(a: number): number {
+  let x = (a + Math.PI) % (Math.PI * 2);
+  if (x < 0) x += Math.PI * 2;
+  return x - Math.PI;
+}
+
 /** Shortest signed difference between two angles, in (-pi, pi]. */
 export function angleDelta(from: number, to: number): number {
   let d = (to - from) % (Math.PI * 2);
