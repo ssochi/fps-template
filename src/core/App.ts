@@ -105,6 +105,9 @@ export class App {
     // A handle for the console and for automated checks. Everything reachable
     // through it is already public API of the pieces it exposes.
     (window as unknown as { forge: App }).forge = this;
+    // Load an arbitrary genome, for tests that need a specific creature rather
+    // than a random one.
+    (window as unknown as { __apply: (g: Genome) => void }).__apply = (g) => this.setGenome(g);
 
     this.loop();
   }

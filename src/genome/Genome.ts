@@ -54,6 +54,12 @@ export interface BodyGene {
   flatten: number;
   /** Leg length as a fraction of body length. Sets how tall it stands. */
   stance: number;
+  /** Surface relief kind: 0 smooth, 1 segmented, 2 scutes, 3 ridges. */
+  reliefKind: number;
+  /** How pronounced the relief is. */
+  relief: number;
+  /** Relief repeats along or around the body, depending on the kind. */
+  reliefScale: number;
 }
 
 export const BODY_TRAITS: TraitTable = {
@@ -69,6 +75,9 @@ export const BODY_TRAITS: TraitTable = {
   arch: { min: -0.25, max: 0.5, label: 'Spine arch' },
   flatten: { min: 0.72, max: 1.45, label: 'Cross-section' },
   stance: { min: 0.12, max: 0.52, label: 'Leg length' },
+  reliefKind: { min: 0, max: 3, label: 'Surface', integer: true, volatility: 0.4 },
+  relief: { min: 0, max: 0.3, label: 'Relief depth' },
+  reliefScale: { min: 2, max: 18, label: 'Relief density' },
 };
 
 // ------------------------------------------------------------------- colour
@@ -79,9 +88,13 @@ export interface PaletteGene {
   lightness: number;
   /** Hue rotation for the belly and accents, in turns. */
   accentShift: number;
-  /** Stripes or spots along the body. */
-  bandCount: number;
-  bandStrength: number;
+  /** Which marking to wear. Indexes `PATTERNS` in the shader. */
+  pattern: number;
+  /** Feature density — stripe count, spot count, patch size. */
+  patternScale: number;
+  patternStrength: number;
+  /** Pale belly, dark back. Independent of the pattern above. */
+  countershade: number;
   /** Strength of the wrap-around rim term in the toon shader. */
   rim: number;
   /** Where the cel ramp's terminator sits. */
@@ -93,8 +106,10 @@ export const PALETTE_TRAITS: TraitTable = {
   saturation: { min: 0.12, max: 0.95, label: 'Saturation' },
   lightness: { min: 0.28, max: 0.78, label: 'Lightness' },
   accentShift: { min: -0.35, max: 0.35, label: 'Accent shift' },
-  bandCount: { min: 0, max: 14, label: 'Bands', integer: true },
-  bandStrength: { min: 0, max: 0.85, label: 'Band strength' },
+  pattern: { min: 0, max: 4, label: 'Marking', integer: true, volatility: 0.4 },
+  patternScale: { min: 1, max: 16, label: 'Marking density' },
+  patternStrength: { min: 0, max: 0.9, label: 'Marking strength' },
+  countershade: { min: 0, max: 0.85, label: 'Countershading' },
   rim: { min: 0, max: 1.1, label: 'Rim light' },
   shadeBias: { min: -0.3, max: 0.4, label: 'Shade bias' },
 };

@@ -41,10 +41,45 @@ export function bodyRadiusAt(gene: BodyGene, t: number): number {
   return Math.max(0.02, gene.girth * gene.length * ends * taper * belly);
 }
 
+/**
+ * Surface relief: segmentation, scutes and ridges, as a radius multiplier.
+ *
+ * The tube's rings are already rewritten every frame, so this costs two trig
+ * calls per vertex and nothing else — no displacement map, no extra geometry,
+ * and `computeVertexNormals` picks it up so it lights as real relief rather
+ * than as a painted-on pattern. It is most of the difference between a body
+ * that reads as an animal and one that reads as a balloon.
+ */
+export function reliefAt(gene: BodyGene, t: number, around: number): number {
+  const amp = gene.relief;
+  if (amp <= 0.001) return 1;
+  const kind = Math.round(gene.reliefKind);
+  const k = gene.reliefScale;
+  if (kind === 1) {
+    // Segmented, like a caterpillar: a bulge per body segment.
+    return 1 + amp * Math.cos(t * k * Math.PI * 2) * 0.5;
+  }
+  if (kind === 2) {
+    // Scutes: raised plates on the back only, fading out at the flanks.
+    const back = Math.max(0, Math.cos((around - 0.25) * Math.PI * 2));
+    return 1 + amp * back * (Math.cos(t * k * Math.PI * 2) * 0.5 + 0.5);
+  }
+  if (kind === 3) {
+    // Longitudinal ridges running nose to tail.
+    return 1 + amp * Math.cos(around * Math.PI * 2 * Math.max(3, Math.round(k * 0.6))) * 0.5;
+  }
+  return 1;
+}
+
 /** Widest point of the body, for ground clearance. */
 export function widestRadius(gene: BodyGene): number {
   let widest = 0;
-  for (let i = 0; i <= 12; i++) widest = Math.max(widest, bodyRadiusAt(gene, i / 12));
+  for (let i = 0; i <= 12; i++) {
+    const r = bodyRadiusAt(gene, i / 12);
+    // Relief can push the belly lower than the plain profile, so clearance has
+    // to be measured against the surface that actually exists.
+    for (let j = 0; j < 8; j++) widest = Math.max(widest, r * reliefAt(gene, i / 12, j / 8));
+  }
   return widest;
 }
 
@@ -164,9 +199,11 @@ export function buildBody(
       _x.setFromMatrixColumn(_m, 0).normalize();
       _y.setFromMatrixColumn(_m, 1).normalize();
       for (let i = 0; i < RADIAL_SEGMENTS; i++) {
-        const a = (i / RADIAL_SEGMENTS) * Math.PI * 2;
-        const cx = Math.cos(a) * radius;
-        const cy = Math.sin(a) * radius * gene.flatten;
+        const u = i / RADIAL_SEGMENTS;
+        const a = u * Math.PI * 2;
+        const rr = radius * reliefAt(gene, t, u);
+        const cx = Math.cos(a) * rr;
+        const cy = Math.sin(a) * rr * gene.flatten;
         array[v++] = _pos.x + _x.x * cx + _y.x * cy;
         array[v++] = _pos.y + _x.y * cx + _y.y * cy;
         array[v++] = _pos.z + _x.z * cx + _y.z * cy;

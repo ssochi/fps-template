@@ -42,6 +42,32 @@ Two things that took tuning rather than thought:
   Attachments are matched between parents by kind and position, so one parent's front legs cross with
   the other's front legs rather than with its horns.
 
+### Diverse
+
+Independent uniform draws over every trait do not give variety — they give the *middle* of the space,
+over and over. The shapes worth seeing need several traits at their extremes simultaneously: a snake is
+long **and** many-segmented **and** legless **and** high spine-flex, and the chance of drawing all four
+together is negligible. Measured before body plans existed, nearly every creature came out a medium tube
+on four medium legs.
+
+So randomisation goes through an **archetype** — quadruped, insectoid, serpent, arachnid, biped, flier,
+blob — which narrows the ranges and says how many legs go where. An archetype is a *prior*, not a new
+representation: everything it produces is an ordinary genome, and nothing downstream knows archetypes
+exist. A bred creature has no archetype at all, only the genes it inherited. Ranges are expressed as
+fractions of each trait's declared range, so retuning a trait's bounds cannot silently invalidate every
+archetype that mentioned it.
+
+Markings are five hard-edged patterns — bands, spots, patches, segments, plain — plus independent
+countershading, all driven from two coordinates: the shared spine parameter and the angle around each
+part. That pairing is what lets one stripe wrap the body, the legs and the tail as a single pattern,
+with no UV unwrap of geometry that did not exist a frame ago.
+
+Surface **relief** — segmentation rings, dorsal scutes, longitudinal ridges — is a radius multiplier
+applied as the body tube is rewritten each frame. It costs two trig calls per vertex, needs no
+displacement map, and `computeVertexNormals` picks it up so it lights as real relief rather than as a
+painted-on pattern. It is most of the difference between a body that reads as an animal and one that
+reads as a balloon.
+
 ### Composable
 
 A creature does not have a head field and a legs field. It has a list of **attachments**:
@@ -93,7 +119,8 @@ The contract a part must keep is short, and all three clauses exist because brea
 2. **Bones run down local `-Y`,** with the child joint at `(0, -length, 0)`. Every solver assumes it.
 3. **Return the rigs you want animated.** Returning nothing is fine — a horn is a perfectly good part.
 
-Ten kinds ship: leg, head, tail, antenna, horn, fin, armour plate, wing, eye stalk.
+Twelve kinds ship: leg, head, tail, antenna, horn, fin, armour plate, wing, eye stalk, frill, shell,
+pincer.
 
 ---
 
@@ -172,6 +199,14 @@ stand with every foot planted.
 surface's depth, so anywhere the geometry was thin the two coincided and speckled. Expanding along the
 view-space normal instead pushes a back face away from the camera, where it belongs.
 
+**Creatures walking off the world.** Over six simulated minutes each, five of eight left the
+thirty-metre ground entirely; the worst reached 550 m and was still going. The containment steering had
+two faults, and the second is the instructive one: it was written `lerp(desiredHeading, inward, t)`, but
+`desiredHeading` is an unbounded running sum while `inward` comes from `atan2` and lives in (-pi, pi].
+Interpolating a raw number toward a wrapped one is not a turn toward anything — once the sum had
+drifted a few turns from zero the "correction" pointed somewhere arbitrary, often outward. Angles need
+`angleDelta`. Measured after: 0/8 leave an 11.5 m pen, max distance 8.7-10.5 m.
+
 ---
 
 ## Layout
@@ -186,6 +221,7 @@ src/
 │   └── MathUtils.ts            damp, springs, value noise
 ├── genome/
 │   ├── Genome.ts               The data model + trait tables + repair-on-load
+│   ├── Archetypes.ts           Body plans: priors over the same genome
 │   └── Mutate.ts               Randomise, mutate, breed — all generic over traits
 ├── build/
 │   ├── CreatureBuilder.ts      Genome -> rig + meshes
@@ -216,6 +252,8 @@ src/
 
 - Proportions are good on most rolls but not all; extreme trait combinations still produce creatures
   that read as odd rather than as animals.
+- Legless creatures slide rather than slither — the spine wave is there, but nothing converts it into
+  forward thrust, so a serpent moves like a snake on ice.
 - Feet do not conform to uneven ground — the world is flat, so the planting solver has no height query.
 - Wings flap on a fixed cycle rather than being driven by anything.
 

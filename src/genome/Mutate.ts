@@ -11,6 +11,7 @@ import {
   type TraitTable,
 } from './Genome';
 import { allParts, countOfKind, getPart, type PartDefinition } from '../build/PartRegistry';
+import { drawTrait, pickArchetype, type Span } from './Archetypes';
 
 /**
  * Variation operators.
@@ -68,14 +69,16 @@ function addableParts(genome: Genome): PartDefinition[] {
 /**
  * A brand new creature.
  *
- * Deliberately not "every part with uniform probability": a random pile of
- * appendages is noise, and the thing that makes a generated creature read as an
- * animal is that it has one head, an even number of legs on the ground, and
- * only then some decoration. The structure below is the prior; everything
- * inside it is free.
+ * Drawn through a body plan rather than uniformly. Independent uniform draws
+ * over every trait do not give variety, they give the middle of the space over
+ * and over: the shapes worth seeing need several traits at their extremes *at
+ * the same time*, and those corners are never reached by chance. `Archetypes`
+ * explains the reasoning; the result is still an ordinary genome that mutation
+ * and breeding can take anywhere.
  */
 export function randomGenome(seed = randomSeed()): Genome {
   const rng = new Rng(seed);
+  const plan = pickArchetype(rng);
   const genome: Genome = {
     seed,
     body: {} as Genome['body'],
@@ -84,54 +87,57 @@ export function randomGenome(seed = randomSeed()): Genome {
     attachments: [],
   };
 
-  const fill = (table: TraitTable): Record<string, number> => {
+  const fill = (table: TraitTable, spans: Record<string, Span> | undefined): Record<string, number> => {
     const out: Record<string, number> = {};
-    for (const [key, spec] of Object.entries(table)) {
-      const v = rng.range(spec.min, spec.max);
-      out[key] = spec.integer ? Math.round(v) : v;
-    }
+    for (const key of Object.keys(table)) out[key] = drawTrait(key, table, spans, rng);
     return out;
   };
-  Object.assign(genome.body, fill(BODY_TRAITS));
-  Object.assign(genome.palette, fill(PALETTE_TRAITS));
-  Object.assign(genome.motion, fill(MOTION_TRAITS));
+  Object.assign(genome.body, fill(BODY_TRAITS, plan.body));
+  Object.assign(genome.palette, fill(PALETTE_TRAITS, plan.palette));
+  Object.assign(genome.motion, fill(MOTION_TRAITS, plan.motion));
 
-  const head = getPart('head');
-  if (head) genome.attachments.push(makeAttachment(head, rng));
-
-  // Legs come in pairs, spaced along the body. Placing them by an even sweep
-  // rather than at random keeps the creature standing on a stable base, which
-  // random placement does not.
+  // Legs first: they come in mirrored pairs spread evenly along the plan's
+  // span. Placing them by an even sweep rather than at random is what keeps
+  // the creature on a stable base — random placement puts three of four legs
+  // at one end and the animal pivots on its nose.
   const leg = getPart('leg');
-  if (leg) {
-    const pairs = rng.weighted([1, 2, 2, 3, 4], (n) => (n === 2 ? 3 : 1));
+  const pairs = rng.pick(plan.legPairs);
+  if (leg && pairs > 0) {
+    const sprawl = plan.legSprawl ?? [0, 0.5];
     for (let i = 0; i < pairs; i++) {
-      const t = pairs === 1 ? 0.4 : 0.18 + (i / (pairs - 1)) * 0.58;
+      const t = pairs === 1 ? (plan.legSpan[0] + plan.legSpan[1]) / 2
+        : plan.legSpan[0] + (i / (pairs - 1)) * (plan.legSpan[1] - plan.legSpan[0]);
       const a = makeAttachment(leg, rng);
-      a.at = t + rng.range(-0.03, 0.03);
+      a.at = clamp01(t + rng.range(-0.025, 0.025));
       a.symmetry = 'pair';
-      a.around = rng.range(-0.45, 0.45);
+      // Sprawl: 0 is directly underneath, higher swings the hips outboard.
+      a.around = rng.range(sprawl[0], sprawl[1]) * 1.15 * (rng.chance(0.5) ? 1 : -1);
       // Front and rear knees fold opposite ways on anything quadrupedal.
       a.traits.kneeBack = t > 0.5 ? 0 : 1;
       genome.attachments.push(a);
     }
   }
 
-  const tail = getPart('tail');
-  if (tail && rng.chance(0.75)) genome.attachments.push(makeAttachment(tail, rng));
+  for (const kind of plan.required) {
+    const def = getPart(kind);
+    if (def && countOfKind(genome, kind) < def.maxCount) {
+      genome.attachments.push(makeAttachment(def, rng));
+    }
+  }
 
-  // Decoration: a couple of rolls from everything that is left.
-  const optional = allParts().filter((p) => !['head', 'leg', 'tail'].includes(p.kind));
-  const extras = rng.int(0, 3);
+  const extras = rng.int(Math.round(plan.extraCount[0]), Math.round(plan.extraCount[1]));
   for (let i = 0; i < extras; i++) {
-    const candidates = optional.filter((def) => countOfKind(genome, def.kind) < def.maxCount);
+    const candidates = plan.extras
+      .map((kind) => getPart(kind))
+      .filter((def): def is PartDefinition => !!def && countOfKind(genome, def.kind) < def.maxCount);
     if (candidates.length === 0) break;
-    const def = rng.weighted(candidates, (d) => d.weight);
-    genome.attachments.push(makeAttachment(def, rng));
+    genome.attachments.push(makeAttachment(rng.weighted(candidates, (d) => d.weight), rng));
   }
 
   return genome;
 }
+
+const clamp01 = (v: number): number => (v < 0.02 ? 0.02 : v > 0.98 ? 0.98 : v);
 
 export interface MutateOptions {
   /** 0 nudges, 1 is a strong mutation, above that is a different animal. */

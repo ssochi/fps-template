@@ -73,7 +73,11 @@ export function buildCreature(genome: Genome): Creature {
    * the height is already at least what the gene's own legs asked for.
    */
   const wanted = gene.length * gene.stance;
-  let rideHeight = Math.max(0.12, widestRadius(gene) * flatten * 1.04);
+  // The arch bends the spine, so the ends of the body hang lower than the
+  // straight profile says. A sagging genome parks its tail through the floor
+  // without this term.
+  const sag = Math.abs(gene.arch) * gene.length * 0.13;
+  let rideHeight = Math.max(0.12, widestRadius(gene) * flatten * 1.04 + sag);
   for (const a of legs) rideHeight = Math.max(rideHeight, wanted * a.scale * 0.9 + socketDrop(a));
 
   let legLength = wanted;

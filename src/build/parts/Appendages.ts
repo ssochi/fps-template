@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { registerPart, type PartBuildContext } from '../PartRegistry';
-import { addMesh, blob, membraneGeometry, plateGeometry, spikeGeometry } from '../Shapes';
+import { addMesh, blob, boneGeometry, membraneGeometry, plateGeometry, spikeGeometry } from '../Shapes';
 import type { ChainRig, PartRigs } from '../../anim/Rig';
 import { lerp } from '../../core/MathUtils';
 
@@ -404,5 +404,181 @@ registerPart({
     addMesh(eye, blob(r, {}), ctx.materials.get('eye'), ctx.materials.outline, ctx.spine);
     addMesh(eye, blob(r * 0.5, { stretch: 0.6 }), ctx.materials.get('claw'), null, ctx.spine, [0, 0, r * 0.7]);
     return rigs;
+  },
+});
+
+// ----------------------------------------------------------- more silhouette
+
+/**
+ * A frill: plates radiating from one point, like a ceratopsian's shield or a
+ * frilled lizard's collar.
+ *
+ * Distinct from `fin` because the plates fan *around* the attachment rather
+ * than marching along the spine, which is a different silhouette entirely — a
+ * frill reads as a face, a row of fins reads as a back.
+ */
+registerPart({
+  kind: 'frill',
+  label: 'Frill',
+  group: 'crest',
+  maxCount: 3,
+  weight: 3,
+  traits: {
+    radius: { min: 0.9, max: 3.2, label: 'Frill radius' },
+    spread: { min: 0.5, max: 1, label: 'Frill spread' },
+    blades: { min: 4, max: 11, label: 'Frill blades', integer: true },
+    rake: { min: -0.5, max: 0.9, label: 'Frill rake' },
+  },
+  defaultPlacement: (rng) => ({
+    at: rng.range(0.72, 0.94),
+    symmetry: 'single',
+    around: Math.PI,
+    scale: rng.range(0.8, 1.3),
+  }),
+  build: (ctx) => {
+    const blades = Math.max(3, Math.round(ctx.traits.blades));
+    const unit = ctx.bodyRadius * 0.9 + ctx.bodyLength * 0.05;
+    const r = unit * ctx.traits.radius * ctx.attachment.scale;
+    const fan = new THREE.Object3D();
+    fan.rotation.x = ctx.traits.rake;
+    ctx.socket.add(fan);
+    for (let i = 0; i < blades; i++) {
+      // Fan across the back rather than a full ring: a frill is a half-disc.
+      const t = blades === 1 ? 0 : i / (blades - 1) - 0.5;
+      const angle = t * Math.PI * ctx.traits.spread;
+      const node = new THREE.Object3D();
+      node.rotation.z = angle;
+      // The middle blades are longest, which is what makes it a shield.
+      const falloff = 1 - Math.abs(t) * 0.55;
+      fan.add(node);
+      addMesh(
+        node,
+        plateGeometry(r * 0.55 * falloff, r * falloff, unit * 0.08),
+        ctx.materials.get('membrane'),
+        ctx.materials.outline,
+        ctx.spine,
+        [0, -r * falloff * 0.5, 0],
+        [0, 0, Math.PI],
+      );
+    }
+  },
+});
+
+/**
+ * A carapace: a domed shell over the back.
+ *
+ * The one part that changes a creature's read from "animal" to "armoured",
+ * and cheap — a squashed hemisphere scaled to the body it sits on.
+ */
+registerPart({
+  kind: 'shell',
+  label: 'Shell',
+  group: 'crest',
+  maxCount: 2,
+  weight: 3,
+  traits: {
+    size: { min: 0.8, max: 2.1, label: 'Shell size' },
+    dome: { min: 0.3, max: 1.3, label: 'Shell dome' },
+    ribs: { min: 0, max: 7, label: 'Shell ribs', integer: true },
+  },
+  defaultPlacement: (rng) => ({
+    at: rng.range(0.3, 0.66),
+    symmetry: 'single',
+    around: Math.PI,
+    scale: rng.range(0.9, 1.3),
+  }),
+  build: (ctx) => {
+    const r = (ctx.bodyRadius * 1.15 + ctx.bodyLength * 0.05) * ctx.traits.size * ctx.attachment.scale;
+    const dome = new THREE.Object3D();
+    ctx.socket.add(dome);
+    addMesh(
+      dome,
+      blob(r, { squash: ctx.traits.dome, stretch: 1.35 }),
+      ctx.materials.get('horn'),
+      ctx.materials.outline,
+      ctx.spine,
+      // Sunk into the body so it reads as attached rather than balanced on top.
+      [0, r * ctx.traits.dome * 0.25, 0],
+    );
+    const ribs = Math.round(ctx.traits.ribs);
+    for (let i = 0; i < ribs; i++) {
+      const t = ribs === 1 ? 0 : i / (ribs - 1) - 0.5;
+      const node = new THREE.Object3D();
+      node.position.set(0, r * ctx.traits.dome * 0.25, t * r * 2.1);
+      node.rotation.x = Math.PI / 2;
+      dome.add(node);
+      addMesh(
+        node,
+        new THREE.TorusGeometry(r * Math.sqrt(Math.max(0.02, 1 - (t * 2) ** 2)) * 0.98, r * 0.055, 6, 14, Math.PI),
+        ctx.materials.get('claw'),
+        null,
+        ctx.spine,
+        [0, 0, 0],
+        [0, 0, 0],
+      );
+    }
+  },
+});
+
+/**
+ * A pincer on a short arm.
+ *
+ * Two jaws on one hinge, so it reads as a working claw rather than as a pair of
+ * spikes — the near jaw is a mirror of the far one about the hinge plane.
+ */
+registerPart({
+  kind: 'pincer',
+  label: 'Pincer',
+  group: 'limb',
+  maxCount: 4,
+  weight: 3,
+  traits: {
+    arm: { min: 0.4, max: 2, label: 'Arm length' },
+    jaw: { min: 0.4, max: 1.6, label: 'Jaw size' },
+    gape: { min: 0.05, max: 0.7, label: 'Gape' },
+    thickness: { min: 0.25, max: 0.9, label: 'Arm thickness' },
+  },
+  defaultPlacement: (rng) => ({
+    at: rng.range(0.72, 0.93),
+    symmetry: 'pair',
+    around: rng.range(0.9, 1.5),
+    scale: rng.range(0.8, 1.3),
+  }),
+  build: (ctx) => {
+    const unit = ctx.bodyRadius * 0.9 + ctx.bodyLength * 0.05;
+    const armLength = unit * ctx.traits.arm * 1.4 * ctx.attachment.scale;
+    const thick = unit * ctx.traits.thickness * 0.5;
+    const jaw = unit * ctx.traits.jaw * 1.35 * ctx.attachment.scale;
+    const skin = ctx.materials.get('skin');
+    const claw = ctx.materials.get('claw');
+    const outline = ctx.materials.outline;
+
+    // Two-segment arm, on the -Y bone convention like everything else.
+    const upper = new THREE.Object3D();
+    upper.rotation.x = -0.7;
+    ctx.socket.add(upper);
+    addMesh(upper, boneGeometry(armLength * 0.55, thick, thick * 0.8), skin, outline, ctx.spine);
+    const fore = new THREE.Object3D();
+    fore.position.y = -armLength * 0.55;
+    fore.rotation.x = 1.15;
+    upper.add(fore);
+    addMesh(fore, boneGeometry(armLength * 0.45, thick * 0.8, thick * 0.65), skin, outline, ctx.spine);
+
+    const hinge = new THREE.Object3D();
+    hinge.position.y = -armLength * 0.45;
+    fore.add(hinge);
+    for (const s of [-1, 1]) {
+      const half = new THREE.Object3D();
+      half.rotation.x = s * ctx.traits.gape;
+      hinge.add(half);
+      addMesh(
+        half,
+        blob(jaw * 0.5, { squash: 1.8, stretch: 0.55, taper: 0.5 }),
+        claw,
+        outline,
+        ctx.spine,
+        [0, -jaw * 0.6, 0],
+      );
+    }
   },
 });

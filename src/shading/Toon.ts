@@ -77,8 +77,10 @@ export function makeGradientMap(steps: number, bias: number): THREE.DataTexture 
 
 export interface ToonUniforms {
   uAccent: { value: THREE.Color };
-  uBandCount: { value: number };
-  uBandStrength: { value: number };
+  uPattern: { value: number };
+  uPatternScale: { value: number };
+  uPatternStrength: { value: number };
+  uCountershade: { value: number };
   uRim: { value: number };
   uRimColor: { value: THREE.Color };
 }
@@ -125,12 +127,50 @@ function roleColours(p: PaletteGene): Record<Role, THREE.Color> {
   };
 }
 
+/**
+ * Markings.
+ *
+ * Two coordinates do all of it: `vSpine`, which runs nose to tail and is shared
+ * by every part, and the angle around the part's own axis. That pairing is what
+ * lets a stripe wrap the body, the legs and the tail as one pattern rather than
+ * restarting per mesh, and it needs no UV unwrap of geometry that did not exist
+ * a frame ago.
+ *
+ * Every marking is a hard step rather than a smooth gradient, for the same
+ * reason the light ramp is: a soft edge on a cel-shaded surface reads as an
+ * artefact, a hard one reads as drawn.
+ */
 const BAND_CHUNK = /* glsl */ `
-  // Bands run along the spine coordinate, so they wrap the body, the legs and
-  // the tail as one pattern instead of restarting per mesh.
-  float bandPhase = fract(vSpine * uBandCount);
-  float band = step(0.5, bandPhase);
-  diffuseColor.rgb = mix(diffuseColor.rgb, uAccent, band * uBandStrength);
+  float pu = vSpine * uPatternScale;
+  float pv = atan(vLocal.y, vLocal.x) * 0.15915494 + 0.5;
+  float mark = 0.0;
+  int mode = int(uPattern + 0.5);
+
+  if (mode == 1) {
+    // Bands around the body.
+    mark = step(0.5, fract(pu));
+  } else if (mode == 2) {
+    // Spots: one per cell, jittered so the grid does not read as a grid.
+    vec2 cell = vec2(pu, pv * max(3.0, uPatternScale * 0.7));
+    vec2 id = floor(cell);
+    vec2 f = fract(cell) - 0.5;
+    float h = fract(sin(dot(id, vec2(127.1, 311.7))) * 43758.5453);
+    vec2 jitter = vec2(h - 0.5, fract(h * 17.0) - 0.5) * 0.5;
+    mark = 1.0 - step(0.16 + h * 0.16, length(f - jitter));
+  } else if (mode == 3) {
+    // Patches: soft noise, hard threshold.
+    float n = sin(pu * 2.1 + sin(pv * 6.28 * 2.0) * 1.7) * 0.5 + 0.5;
+    mark = step(0.55, n);
+  } else if (mode == 4) {
+    // Segments: a ring at every joint, like an insect's plates.
+    mark = smoothstep(0.42, 0.5, abs(fract(pu) - 0.5)) ;
+  }
+  diffuseColor.rgb = mix(diffuseColor.rgb, uAccent, mark * uPatternStrength);
+
+  // Countershading is independent of the marking: nearly every real animal has
+  // it, and it is most of why a plain one still reads as solid rather than flat.
+  float up = clamp(vObjNormal.y * 0.5 + 0.5, 0.0, 1.0);
+  diffuseColor.rgb = mix(diffuseColor.rgb, uAccent, (1.0 - up) * uCountershade * 0.85);
 `;
 
 const RIM_CHUNK = /* glsl */ `
@@ -156,26 +196,42 @@ function createToonMaterial(
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uAccent = uniforms.uAccent;
-    shader.uniforms.uBandCount = uniforms.uBandCount;
-    shader.uniforms.uBandStrength = uniforms.uBandStrength;
+    shader.uniforms.uPattern = uniforms.uPattern;
+    shader.uniforms.uPatternScale = uniforms.uPatternScale;
+    shader.uniforms.uPatternStrength = uniforms.uPatternStrength;
+    shader.uniforms.uCountershade = uniforms.uCountershade;
     shader.uniforms.uRim = uniforms.uRim;
     shader.uniforms.uRimColor = uniforms.uRimColor;
 
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        `#include <common>\nattribute float ${SPINE_ATTRIBUTE};\nvarying float vSpine;`,
+        `#include <common>
+        attribute float ${SPINE_ATTRIBUTE};
+        varying float vSpine;
+        varying vec3 vLocal;
+        varying vec3 vObjNormal;`,
       )
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\n  vSpine = ${SPINE_ATTRIBUTE};`);
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vSpine = ${SPINE_ATTRIBUTE};
+        vLocal = transformed;
+        vObjNormal = normalize(objectNormal);`,
+      );
 
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>
         varying float vSpine;
+        varying vec3 vLocal;
+        varying vec3 vObjNormal;
         uniform vec3 uAccent;
-        uniform float uBandCount;
-        uniform float uBandStrength;
+        uniform float uPattern;
+        uniform float uPatternScale;
+        uniform float uPatternStrength;
+        uniform float uCountershade;
         uniform float uRim;
         uniform vec3 uRimColor;`,
       )
@@ -185,7 +241,7 @@ function createToonMaterial(
       .replace('#include <opaque_fragment>', `${RIM_CHUNK}\n#include <opaque_fragment>`);
   };
   // Injected uniforms change the program, so the key must change with them.
-  material.customProgramCacheKey = () => 'creature-toon-v1';
+  material.customProgramCacheKey = () => 'creature-toon-v2';
   return material;
 }
 
@@ -244,8 +300,10 @@ export function createOutlineMaterial(width: number): THREE.ShaderMaterial {
 export function createMaterials(palette: PaletteGene, outlineWidth: number): CreatureMaterials {
   const uniforms: ToonUniforms = {
     uAccent: { value: new THREE.Color() },
-    uBandCount: { value: 0 },
-    uBandStrength: { value: 0 },
+    uPattern: { value: 0 },
+    uPatternScale: { value: 6 },
+    uPatternStrength: { value: 0 },
+    uCountershade: { value: 0 },
     uRim: { value: 0 },
     uRimColor: { value: new THREE.Color(0xffffff) },
   };
@@ -274,8 +332,10 @@ export function createMaterials(palette: PaletteGene, outlineWidth: number): Cre
     for (const role of roles) materials.get(role)!.color.copy(next[role]);
     materials.get('eye')!.emissive.copy(next.eye).multiplyScalar(0.55);
     uniforms.uAccent.value.copy(next.belly);
-    uniforms.uBandCount.value = p.bandCount;
-    uniforms.uBandStrength.value = p.bandStrength;
+    uniforms.uPattern.value = p.pattern;
+    uniforms.uPatternScale.value = p.patternScale;
+    uniforms.uPatternStrength.value = p.patternStrength;
+    uniforms.uCountershade.value = p.countershade;
     uniforms.uRim.value = p.rim;
     uniforms.uRimColor.value.copy(hsl(p.hue + 0.5, 0.35, 0.85));
 
