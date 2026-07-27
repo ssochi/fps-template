@@ -3,14 +3,27 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 import { CollisionWorld } from '../physics/CollisionWorld';
 import { LevelBuilder, type LevelBuildResult } from './LevelBuilder';
-import { buildFridge, buildShowcar, buildSofa, type Showpiece } from './Showpieces';
+import {
+  buildDecanterSet,
+  buildFridge,
+  buildPlant,
+  buildShowcar,
+  buildSofa,
+  buildTypewriter,
+  TYPEBAR_REST,
+  TYPEBAR_STRUCK,
+  type Showpiece,
+  type TypingLinkage,
+} from './Showpieces';
 import {
   brushedMetalSurface,
   carbonSurface,
   fabricSurface,
   studioFloorSurface,
   surfaceMaterial,
+  terracottaSurface,
   walnutSurface,
+  wornEnamelSurface,
   type Surface,
 } from './PbrSurface';
 import { damp } from '../core/MathUtils';
@@ -36,6 +49,9 @@ import { damp } from '../core/MathUtils';
 
 const ROOM = { width: 34, depth: 30, height: 9 };
 const PLINTH_Y = 0.35;
+/** How far the carriage steps per character, and how many fit on a line. */
+const TYPE_ADVANCE = 0.0125;
+const TYPE_COLUMNS = 22;
 
 interface Turntable {
   node: THREE.Group;
@@ -50,6 +66,11 @@ export class StudioLevel extends LevelBuilder {
   private readonly fridgeLights: THREE.Light[] = [];
   private fridgeOpen = false;
   private fridgeBlend = 0;
+  private typing: TypingLinkage | null = null;
+  /** Progress through one keystroke, 0..1; -1 when idle. */
+  private strike = -1;
+  private strikeKey = 0;
+  private carriageStep = 0;
   private environmentScene: THREE.Scene | null = null;
   /** Flat matte paint for everything off-camera: walls, ceiling, light stands. */
   private matte!: THREE.MeshStandardMaterial;
@@ -97,6 +118,12 @@ export class StudioLevel extends LevelBuilder {
           label: () => (this.fridgeOpen ? 'Close the fridge' : 'Open the fridge'),
           activate: () => this.toggleFridge(),
         },
+        {
+          position: new THREE.Vector3(0.4, 0, 3.6),
+          radius: 2.2,
+          label: () => 'Strike a key',
+          activate: () => this.strikeKey_(),
+        },
       ],
       environmentScene: this.environmentScene,
       // The IBL is a second key light, not just a reflection source: at full
@@ -139,6 +166,58 @@ export class StudioLevel extends LevelBuilder {
     // A fridge bulb is a couple of candela, not a floodlight. Overdriving it
     // clips the white liner and blooms the entire frame.
     for (const light of this.fridgeLights) light.intensity = this.fridgeBlend * 0.5;
+
+    this.updateTyping(dt);
+  }
+
+  /**
+   * One keystroke, driven as a single 0..1 phase.
+   *
+   * A typewriter is a linkage, not a set of independent animations: the key
+   * goes down, the typebar it is connected to swings up to the platen, and only
+   * when the slug lands does the carriage step left. Driving the three from one
+   * phase with different curves is what keeps them connected — animate them
+   * separately and the escapement fires before the bar arrives.
+   */
+  private updateTyping(dt: number): void {
+    const rig = this.typing;
+    if (!rig) return;
+
+    if (this.strike >= 0) {
+      this.strike += dt * 5.5;
+      if (this.strike >= 1) {
+        this.strike = -1;
+        this.carriageStep = Math.min(this.carriageStep + 1, TYPE_COLUMNS);
+      }
+    }
+
+    const p = this.strike;
+    // Down fast, back up slower: the key is thrown, not eased.
+    const press = p < 0 ? 0 : p < 0.35 ? p / 0.35 : Math.max(0, 1 - (p - 0.35) / 0.65);
+    const key = rig.keys[this.strikeKey];
+    key.node.position.y = key.rest - press * 0.009;
+
+    // The bar leads the key slightly and overshoots into the platen.
+    const swing = p < 0 ? 0 : p < 0.42 ? p / 0.42 : Math.max(0, 1 - (p - 0.42) / 0.58);
+    const bar = rig.typebars[this.strikeKey % rig.typebars.length];
+    bar.rotation.x = TYPEBAR_REST + swing * (TYPEBAR_STRUCK - TYPEBAR_REST);
+
+    // The carriage eases to its new column rather than jumping.
+    const target = rig.carriageRest - this.carriageStep * TYPE_ADVANCE;
+    rig.carriage.position.x = damp(rig.carriage.position.x, target, 9, dt);
+  }
+
+  private strikeKey_(): void {
+    const rig = this.typing;
+    if (!rig || this.strike >= 0) return;
+    if (this.carriageStep >= TYPE_COLUMNS) {
+      // End of the line: the carriage returns instead of typing.
+      this.carriageStep = 0;
+      return;
+    }
+    // Skip the space bar, which is the last entry and has no typebar.
+    this.strikeKey = Math.floor(Math.random() * (rig.keys.length - 1));
+    this.strike = 0;
   }
 
   private toggleFridge(): void {
@@ -261,42 +340,65 @@ export class StudioLevel extends LevelBuilder {
   // -------------------------------------------------------------- showpieces
 
   private buildShowpieces(): void {
-    const specs: { build: () => Showpiece; x: number; z: number; label: string; sub: string }[] = [
-      { build: buildShowcar, x: -8.5, z: -2, label: 'MERIDIAN GT-9', sub: 'CLEARCOAT · CARBON · GLASS' },
-      { build: buildSofa, x: -1, z: -1.5, label: 'HALDEN 3-SEAT', sub: 'SHEEN FABRIC · WALNUT' },
-      { build: buildFridge, x: 4.6, z: -1.2, label: 'COLDLINE CF-90', sub: 'ANISOTROPIC STEEL · OPENS' },
+    // Two arcs. The large pieces stand at ankle height on wide plinths; the
+    // small ones are on tall pedestals nearer the door, because a typewriter
+    // at 0.35 m is a thing you look down on rather than at.
+    const specs: {
+      build: () => Showpiece;
+      x: number;
+      z: number;
+      height: number;
+      label: string;
+      sub: string;
+      /** The glowing rim. Off for anything that refracts what is around it. */
+      ring?: boolean;
+    }[] = [
+      { build: buildShowcar, x: -8.5, z: -2, height: PLINTH_Y, label: 'MERIDIAN GT-9', sub: 'CLEARCOAT · CARBON · GLASS' },
+      { build: buildSofa, x: -1, z: -1.5, height: PLINTH_Y, label: 'HALDEN 3-SEAT', sub: 'SHEEN FABRIC · WALNUT' },
+      { build: buildFridge, x: 4.6, z: -1.2, height: PLINTH_Y, label: 'COLDLINE CF-90', sub: 'ANISOTROPIC STEEL · OPENS' },
+      { build: buildPlant, x: -5.4, z: 3.6, height: PLINTH_Y, label: 'MONSTERA', sub: 'ALPHA CUTOUT · TRANSLUCENCY' },
+      { build: buildTypewriter, x: 0.4, z: 3.6, height: 0.86, label: 'HALDEN No.5', sub: 'WORN ENAMEL · TYPES' },
+      // No rim light under the crystal. Measured: with the ring lit, the pour
+      // sampled (111,183,111) — a refractive object picks up whatever is
+      // behind it, and saturated cyan behind amber absorption is green. That
+      // is the renderer being right and the set dressing being wrong; a real
+      // studio does not put a coloured practical under glassware either.
+      { build: buildDecanterSet, x: 5.6, z: 3.6, height: 0.9, label: 'CUT CRYSTAL', sub: 'TRANSMISSION · DISPERSION', ring: false },
     ];
 
     for (const spec of specs) {
       const piece = spec.build();
       this.showpieces.push(piece);
 
-      const radius = Math.max(piece.size.x, piece.size.z) * 0.62 + 0.5;
+      const plinthY = spec.height;
+      const radius = Math.max(piece.size.x, piece.size.z) * 0.62 + (plinthY > PLINTH_Y ? 0.14 : 0.5);
       // Plinth.
       this.prop(
-        new THREE.CylinderGeometry(radius, radius * 1.02, PLINTH_Y, 48),
+        new THREE.CylinderGeometry(radius, radius * 1.02, plinthY, 48),
         this.materials.concreteDark,
-        [spec.x, PLINTH_Y / 2, spec.z],
+        [spec.x, plinthY / 2, spec.z],
         [0, 0, 0],
         { surface: 'concrete' },
       );
       this.world.addBox(
-        new THREE.Vector3(spec.x, PLINTH_Y / 2, spec.z),
-        new THREE.Vector3(radius * 2, PLINTH_Y, radius * 2),
+        new THREE.Vector3(spec.x, plinthY / 2, spec.z),
+        new THREE.Vector3(radius * 2, plinthY, radius * 2),
         'concrete',
       );
-      this.prop(
-        new THREE.TorusGeometry(radius, 0.02, 8, 60),
-        this.materials.emissiveCyan,
-        [spec.x, PLINTH_Y + 0.01, spec.z],
-        [Math.PI / 2, 0, 0],
-        { surface: 'metal', castShadow: false, shootable: false },
-      );
+      if (spec.ring !== false) {
+        this.prop(
+          new THREE.TorusGeometry(radius, 0.02, 8, 60),
+          this.materials.emissiveCyan,
+          [spec.x, plinthY + 0.01, spec.z],
+          [Math.PI / 2, 0, 0],
+          { surface: 'metal', castShadow: false, shootable: false },
+        );
+      }
 
       // The fridge stays still so its doors can be walked into; the other two
       // turn, which is how you actually inspect a silhouette.
       const table = new THREE.Group();
-      table.position.set(spec.x, PLINTH_Y, spec.z);
+      table.position.set(spec.x, plinthY, spec.z);
       piece.root.castShadow = true;
       piece.root.traverse((child) => {
         const asMesh = child as THREE.Mesh;
@@ -309,14 +411,23 @@ export class StudioLevel extends LevelBuilder {
       this.root.add(table);
       this.collidables.push(table);
 
-      if (piece.hinges.length === 0) {
+      if (piece.typing) {
+        // The typewriter has to hold still and face the visitor: you stand at
+        // it to use it, and a turntable would swing the keys out of reach.
+        this.typing = piece.typing;
+        this.world.addBox(
+          new THREE.Vector3(spec.x, plinthY + piece.size.y / 2, spec.z),
+          new THREE.Vector3(piece.size.x, piece.size.y, piece.size.z),
+          'metal',
+        );
+      } else if (piece.hinges.length === 0) {
         this.turntables.push({ node: table, speed: 0.16 });
         // A turning exhibit cannot have a tight axis-aligned collider, so it
         // gets the plinth's own footprint: square, rotation-invariant, and
         // hidden under the visible disc. Without it the player just steps up
-        // the 0.35 m plinth and walks straight through the model.
+        // the plinth and walks straight through the model.
         this.world.addBox(
-          new THREE.Vector3(spec.x, PLINTH_Y + piece.size.y / 2, spec.z),
+          new THREE.Vector3(spec.x, plinthY + piece.size.y / 2, spec.z),
           new THREE.Vector3(radius * 2, piece.size.y, radius * 2),
           'metal',
         );
@@ -333,13 +444,13 @@ export class StudioLevel extends LevelBuilder {
         // want to stand right in the door mouth, not be held off by a plinth-
         // sized box. The doors themselves sweep through you; that is fine.
         this.world.addBox(
-          new THREE.Vector3(spec.x, PLINTH_Y + piece.size.y / 2, spec.z),
+          new THREE.Vector3(spec.x, plinthY + piece.size.y / 2, spec.z),
           new THREE.Vector3(piece.size.x, piece.size.y, piece.size.z),
           'metal',
         );
       }
 
-      this.sign(spec.label, spec.sub, spec.x, 0.22, spec.z + radius + 0.55, 2.6, 0.9, 0, {
+      this.sign(spec.label, spec.sub, spec.x, 0.22, spec.z + radius + 0.55, 2.2, 0.76, 0, {
         background: '#0b0e12',
         borderColor: '#35d6ff',
         color: '#dfe7ee',
@@ -402,6 +513,19 @@ export class StudioLevel extends LevelBuilder {
       ['IRIDESCENCE', { color: 0x101418, metalness: 1, roughness: 0.1, iridescence: 1, iridescenceIOR: 1.8 }],
       ['TRANSMISSION', { color: 0xdff2f5, roughness: 0.02, transmission: 1, thickness: 0.5, ior: 1.5, transparent: true }],
       ['SPECULAR TINT', { color: 0x101010, roughness: 0.2, specularIntensity: 1, specularColor: new THREE.Color(0xffb070) }],
+      // Absorption through the volume, not a tinted surface: the same material
+      // is pale at the rim and deep in the middle because the light has
+      // further to travel. `dispersion` splits it on the way out.
+      ['ABSORPTION', {
+        color: 0xffffff,
+        roughness: 0.02,
+        transmission: 1,
+        thickness: 0.6,
+        ior: 1.5,
+        attenuationColor: new THREE.Color(0xd06a12),
+        attenuationDistance: 0.3,
+        dispersion: 1.4,
+      }],
     ];
     for (let i = 0; i < samples.length; i++) {
       const [label, params] = samples[i];
@@ -484,6 +608,11 @@ export class StudioLevel extends LevelBuilder {
       { name: 'BRUSHED STEEL', surface: brushedMetalSurface(4) },
       { name: 'UPHOLSTERY', surface: fabricSurface('#4e6b7a', 6) },
       { name: 'WALNUT', surface: walnutSurface(4) },
+      // The layered one. Its ORM is the interesting panel: the chips are not a
+      // pattern in the albedo, they are holes where the G and B channels jump
+      // from rough dielectric to smooth metal.
+      { name: 'WORN ENAMEL', surface: wornEnamelSurface(3) },
+      { name: 'TERRACOTTA', surface: terracottaSurface(3) },
     ];
     this.ownedSurfaces.push(...sets.map((s) => s.surface));
 

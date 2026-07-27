@@ -262,7 +262,7 @@ falloff, line-of-sight checks and all. Reload is gated and shown on the dash.
 A test scene for looking at models, built the way the industry builds one. Three showpieces on lit
 turntables, a reference wall to judge them against, and a texture inspector to diagnose them with.
 
-**The three showpieces.**
+**The showpieces.** Six, chosen so each one breaks something the others do not.
 - **Meridian GT-9**, a mid-engine supercar. Twelve lofted body sections with chamfered, tumblehome
   cross-sections; metallic base coat under a `clearcoat` layer with its own near-zero roughness and a
   sparse flake normal map; tinted transmissive glazing; carbon aero with `anisotropy`; ten-spoke painted
@@ -272,6 +272,18 @@ turntables, a reference wall to judge them against, and a texture inspector to d
 - **Coldline CF-90 fridge**, which **opens** — walk up and press `E`. Both doors swing on their real
   hinge lines, the freezer drawer slides, the interior lamp fades up, and inside there are glass shelves,
   crispers, door bins and groceries. Anisotropic brushed steel outside.
+- **A monstera in a terracotta pot** — the organic one. Each leaf is a single alpha-cut quad: the splits
+  and holes *are* the model, since they cannot be geometry at this budget. `alphaTest` rather than
+  `transparent` keeps them in the opaque pass with no sort order to get wrong, and three.js compiles a
+  matching depth variant on its own so the shadows are cut out too.
+- **A Halden No.5 typewriter**, which **types** — press `E` and a key goes down, its typebar swings up to
+  the platen, and *then* the carriage steps left; at the end of the line it returns. It is here for the
+  material, though: chipped enamel over bare steel with grime in the crinkle, which is the one thing
+  every other piece in the room is not. Its forty keytops share one geometry, one material and one
+  texture, each glyph selected by baked UVs out of an atlas.
+- **Cut-crystal decanter, tumblers and a pour** — almost no geometry, entirely a shading test:
+  `attenuationColor` and `attenuationDistance` (Beer-Lambert absorption through the volume, so the belly
+  is deep amber and the shoulder pale from one flat parameter) plus `dispersion`.
 
 **The rig.** Three `RectAreaLight` softboxes as key / fill / rim, each with its visible panel, frame and
 stand; a dim directional light purely to put contact shadows back (area lights cast none); optional
@@ -282,7 +294,8 @@ six balls each isolating one `MeshPhysicalMaterial` feature — clearcoat, sheen
 transmission, specular tint; an eleven-step greyscale wedge and an eight-patch colour checker for
 exposure and white balance; and a 1.8 m figure for scale.
 
-**The map inspector.** For each surface — carbon fibre, brushed steel, upholstery, walnut — its albedo,
+**The map inspector.** For each surface — carbon fibre, brushed steel, upholstery, walnut, worn enamel,
+terracotta — its albedo,
 normal and packed ORM shown unlit and side by side, next to a sphere wearing the full set. This is the
 panel you actually diagnose a broken texture on: a roughness channel that has saturated to white, or a
 normal map that has been tagged as colour, is obvious here and invisible on the model.
@@ -353,8 +366,8 @@ src/
 │   ├── Vehicles.ts             Lofted hypercar / 4x4 / tank models
 │   ├── Thor.ts                 Walking Terran assault mech
 │   ├── StudioLevel.ts          The model studio: light rig, reference charts, map inspector
-│   ├── Showpieces.ts           The three studio models: supercar, sofa, opening fridge
-│   ├── PbrSurface.ts           Procedural albedo / normal / packed-ORM surface authoring
+│   ├── Showpieces.ts           The six studio models: car, sofa, fridge, plant, typewriter, glassware
+│   ├── PbrSurface.ts           Procedural albedo / normal / packed-ORM authoring, single and layered
 │   ├── Targets.ts              Reactive range targets and scoring
 │   ├── RangeSession.ts         Score, accuracy, timed drill
 │   ├── GeometryMerge.ts        Static batching so scenery density stays cheap
@@ -536,9 +549,41 @@ light's quaternion onto the plane that represents it therefore faces the lit sid
 and buries it behind its own frame. `RectAreaLight` also needs `RectAreaLightUniformsLib.init()`, only
 lights Standard and Physical materials, and casts no shadows at all.
 
+**Layered materials.** A used object is not one material with a dirt texture on it, it is a stack:
+steel, enamel over most of it, grime settled into whatever the enamel did not cover. `layeredSurface`
+blends two complete layers through a mask, and blends *every* channel — a chip has to change the colour
+and the roughness and the metalness at once, because getting only the first gives you a decal of a chip
+rather than a chip. Real edge wear follows the mesh's curvature and is baked from a high-poly source; a
+tiling texture has no idea where the model's edges are, so `chipMask` does what a texture artist does
+instead and scatters ragged-edged flakes. Hard edges, because a soft-edged blob reads as a stain.
+
+Two calibration notes, both learned the expensive way: a hundred small chips read as granite, and cutting
+the count alone made the wear invisible — *size* is what separates worn from noisy. And the chart is
+where you see it. On the ORM panel a chip is a hole where G and B jump from rough dielectric to smooth
+metal; on the albedo panel alone it is just a light speck, and a fake would look identical.
+
+**Absorption, and why the textbook model does not render.** Volumetric colour comes from
+`attenuationColor` with `attenuationDistance` — Beer-Lambert, so the tint deepens with the path length
+and one flat parameter gives you a pale rim and a deep middle. The reference wall's ABSORPTION ball is
+the control that proves it works.
+
+The obvious way to model a decanter is a liquid shell at IOR 1.36 nested inside a glass shell at 1.55.
+That renders as *nothing*: three.js transmission refracts a backdrop containing only the **opaque**
+scene, so a transmissive volume inside another transmissive volume is in nobody's backdrop and is simply
+invisible — measured, the pour came out neutral grey while the same absorption on a free-standing ball
+came out amber. Each vessel is therefore two stacked solids split at the fill line: one volume carrying
+the whisky's absorption below, a hollow crystal shell above. That is what the eye receives anyway, since
+glass-whisky-glass reads as one amber body, and it survives a renderer that only refracts once. The
+limit that remains is real: nothing refracts twice, so a tumbler seen through the decanter does not bend.
+
+**A refractive exhibit picks up its surroundings.** Every other plinth in the studio wears a glowing cyan
+rim. Under the crystal it made the pour render green — measured at (111,183,111) — because saturated cyan
+seen through amber absorption *is* green. The renderer was right and the set dressing was wrong; the ring
+is simply omitted there, which is also what a real studio does with coloured practicals near glassware.
+
 **Performance.** ~550-700 draw calls and ~190k triangles on the range; ~700-900 and ~600k on the circuit
 with the pit complex, all three vehicles and half the track in frame. Comfortable on any discrete GPU or a
-modern integrated one; ~700-1000 and ~290k in the studio, where the cost is materials rather than
+modern integrated one; ~700-1300 and ~340k in the studio, where the cost is materials rather than
 geometry. Lighting is deliberately restrained — a forward renderer pays for every light on
 every lit pixel, so the range bay is lit by four strong lamps rather than one per fixture, and the garage
 by two per bay. If you need more headroom, drop the quality preset: it disables bloom, SMAA, shadows, the

@@ -146,7 +146,7 @@ export const LEVELS: readonly LevelDescriptor[] = [
   {
     id: 'studio',
     name: 'Model Studio',
-    blurb: 'PBR test scene: studio rig, reference charts and three showpieces.',
+    blurb: 'PBR test scene: studio rig, reference charts and six showpieces.',
   },
 ];
 

@@ -5,8 +5,11 @@ import {
   brushedMetalSurface,
   carbonSurface,
   fabricSurface,
+  soilSurface,
   surfaceMaterial,
+  terracottaSurface,
   walnutSurface,
+  wornEnamelSurface,
   type Surface,
 } from './PbrSurface';
 import { createCanvasTexture } from './Materials';
@@ -35,7 +38,17 @@ export interface Showpiece {
   hinges: { node: THREE.Group; open: number; axis: 'y' | 'z' }[];
   /** Lights that belong to the piece — the fridge's interior lamp. */
   lights: THREE.Light[];
+  /** The typewriter's linkage, for the level to drive. */
+  typing?: TypingLinkage;
   dispose(): void;
+}
+
+/** Everything the level needs to make the typewriter strike a key. */
+export interface TypingLinkage {
+  keys: { node: THREE.Group; rest: number }[];
+  typebars: THREE.Group[];
+  carriage: THREE.Group;
+  carriageRest: number;
 }
 
 // ---------------------------------------------------------------- materials
@@ -43,6 +56,8 @@ export interface Showpiece {
 interface ShowMaterials {
   surfaces: Surface[];
   materials: THREE.Material[];
+  /** Geometries built per-instance rather than shared; the rest are cached. */
+  geometries: THREE.BufferGeometry[];
 }
 
 function track(store: ShowMaterials, material: THREE.Material): THREE.Material {
@@ -51,13 +66,14 @@ function track(store: ShowMaterials, material: THREE.Material): THREE.Material {
 }
 
 function newStore(): ShowMaterials {
-  return { surfaces: [], materials: [] };
+  return { surfaces: [], materials: [], geometries: [] };
 }
 
 function disposer(store: ShowMaterials): () => void {
   return () => {
     for (const s of store.surfaces) s.dispose();
     for (const m of store.materials) m.dispose();
+    for (const g of store.geometries) g.dispose();
   };
 }
 
@@ -936,6 +952,822 @@ export function buildFridge(): Showpiece {
     size: new THREE.Vector3(W, H, D + 0.1),
     hinges,
     lights: [lamp],
+    dispose: disposer(store),
+  };
+}
+
+// ------------------------------------------------------------- potted plant
+
+/**
+ * A monstera in a terracotta pot.
+ *
+ * Everything else in this scene is a closed hard-surface shell. A plant is the
+ * opposite problem and needs three things none of the others do:
+ *
+ * 1. **Alpha cutout.** A monstera's silhouette *is* the model — the splits and
+ *    holes cannot be geometry at this budget, so each leaf is one alpha-tested
+ *    quad. `alphaTest` rather than `transparent` keeps them in the opaque pass,
+ *    so there is no sort order to get wrong. three.js compiles a matching
+ *    depth-material variant on its own, so the shadows are cut out too.
+ * 2. **Two-sided shading.** A leaf has no back face to cull, and three.js flips
+ *    the normal for back faces, so the underside lights correctly for free.
+ * 3. **Translucency.** A leaf between you and a lamp glows. Thin-walled
+ *    `transmission` is the closest this material model gets.
+ */
+export function buildPlant(): Showpiece {
+  const store = newStore();
+  const root = new THREE.Group();
+  root.name = 'plant';
+
+  // --- leaf texture: colour and silhouette in one RGBA canvas --------------
+  const leafTex = createCanvasTexture(512, (ctx, size) => {
+    const cx = size / 2;
+    // The blade: a rounded heart, drawn once and reused as the clip path.
+    const blade = new Path2D();
+    blade.moveTo(cx, size * 0.03);
+    blade.bezierCurveTo(size * 0.94, size * 0.24, size * 0.9, size * 0.78, cx, size * 0.98);
+    blade.bezierCurveTo(size * 0.1, size * 0.78, size * 0.06, size * 0.24, cx, size * 0.03);
+
+    ctx.save();
+    ctx.clip(blade);
+    ctx.fillStyle = '#2f6b33';
+    ctx.fillRect(0, 0, size, size);
+    // Midrib and lateral veins, lighter than the blade.
+    ctx.strokeStyle = 'rgba(150,190,120,0.55)';
+    ctx.lineWidth = size * 0.012;
+    ctx.beginPath();
+    ctx.moveTo(cx, size * 0.06);
+    ctx.lineTo(cx, size * 0.96);
+    ctx.stroke();
+    ctx.lineWidth = size * 0.006;
+    for (let i = 1; i < 9; i++) {
+      const y = size * (0.1 + i * 0.095);
+      for (const s of [-1, 1]) {
+        ctx.strokeStyle = `rgba(150,190,120,${0.4 - i * 0.02})`;
+        ctx.beginPath();
+        ctx.moveTo(cx, y);
+        ctx.quadraticCurveTo(cx + s * size * 0.22, y + size * 0.03, cx + s * size * 0.46, y + size * 0.1);
+        ctx.stroke();
+      }
+    }
+    // Mottling, so a flat green does not read as plastic.
+    for (let i = 0; i < 900; i++) {
+      const v = Math.random() < 0.5 ? 255 : 0;
+      ctx.fillStyle = `rgba(${v},${v * 0.9},${v * 0.6},${Math.random() * 0.07})`;
+      ctx.beginPath();
+      ctx.arc(Math.random() * size, Math.random() * size, 2 + Math.random() * 7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Fenestration. Cutting *after* painting means the veins run right up to
+    // each split, which is what makes the holes look grown rather than punched.
+    // Fenestration has to cut *deep* — a monstera's margin is split almost to
+    // the midrib, and that division into lobes is the whole silhouette. Nicks
+    // around the edge just read as a damaged houseplant.
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = '#000';
+    for (let i = 0; i < 6; i++) {
+      const y = size * (0.2 + i * 0.125);
+      // Deeper toward the middle of the blade, shallower at tip and base.
+      const t = Math.sin((i / 5) * Math.PI);
+      const depth = size * (0.2 + t * 0.2);
+      const half = size * (0.018 + t * 0.016);
+      for (const sd of [-1, 1]) {
+        const outer = cx + sd * size * 0.52;
+        const inner = cx + sd * (size * 0.5 - depth);
+        // A wedge: wide at the margin, tapering to a rounded stop inboard.
+        ctx.beginPath();
+        ctx.moveTo(outer, y - half * 2.1);
+        ctx.quadraticCurveTo(inner + sd * size * 0.05, y - half * 0.5, inner, y + half * 0.5);
+        ctx.quadraticCurveTo(inner + sd * size * 0.05, y + half * 1.6, outer, y + half * 3.0);
+        ctx.closePath();
+        ctx.fill();
+      }
+      // The oval holes that sit between the splits, near the midrib.
+      for (const sd of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(
+          cx + sd * size * (0.1 + Math.random() * 0.07),
+          y + size * 0.06,
+          size * (0.022 + Math.random() * 0.02),
+          size * 0.015,
+          sd * 0.45,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fill();
+      }
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  });
+
+  const leafMat = track(
+    store,
+    new THREE.MeshPhysicalMaterial({
+      map: leafTex,
+      // Alpha *test*, not alpha blend: a cut-out leaf stays in the opaque pass
+      // and needs no depth sorting against the forty others.
+      alphaTest: 0.5,
+      side: THREE.DoubleSide,
+      roughness: 0.42,
+      metalness: 0,
+      clearcoat: 0.35,
+      clearcoatRoughness: 0.35,
+      sheen: 0.5,
+      sheenRoughness: 0.6,
+      sheenColor: new THREE.Color(0x9fd08a),
+    }),
+  );
+
+  const stemMat = track(
+    store,
+    new THREE.MeshPhysicalMaterial({ color: 0x4c7a3a, roughness: 0.55, metalness: 0, sheen: 0.3 }),
+  );
+
+  const terracotta = terracottaSurface(2.2);
+  store.surfaces.push(terracotta);
+  const potMat = track(store, surfaceMaterial(terracotta, {}));
+  const soil = soilSurface(3);
+  store.surfaces.push(soil);
+  const soilMat = track(store, surfaceMaterial(soil, {}));
+  const pebble = track(
+    store,
+    new THREE.MeshPhysicalMaterial({ color: 0x6d6a63, roughness: 0.8, metalness: 0 }),
+  );
+
+  // --- pot ------------------------------------------------------------------
+  const POT_TOP = 0.42;
+  // A lathe profile that goes up the outside, over the rim and back down the
+  // inside, so the pot is genuinely hollow rather than a cone with a lid.
+  const profile: [number, number][] = [
+    [0, 0],
+    [0.155, 0],
+    [0.168, 0.018],
+    [0.2, 0.11],
+    [0.235, 0.25],
+    [0.248, 0.34],
+    [0.252, 0.365],
+    [0.285, 0.378],
+    [0.285, POT_TOP - 0.015],
+    [0.246, POT_TOP],
+    [0.238, POT_TOP - 0.02],
+    [0.232, 0.3],
+    [0.198, 0.13],
+    [0.172, 0.06],
+    [0, 0.06],
+  ];
+  const potGeo = new THREE.LatheGeometry(
+    profile.map(([x, y]) => new THREE.Vector2(x, y)),
+    48,
+  );
+  mesh(root, potGeo, potMat);
+
+  // Saucer.
+  const saucerGeo = new THREE.LatheGeometry(
+    [
+      [0, 0],
+      [0.3, 0],
+      [0.32, 0.012],
+      [0.335, 0.05],
+      [0.325, 0.052],
+      [0.31, 0.02],
+      [0, 0.018],
+    ].map(([x, y]) => new THREE.Vector2(x, y)),
+    40,
+  );
+  mesh(root, saucerGeo, potMat, [0, -0.018, 0]);
+
+  // --- soil and dressing ----------------------------------------------------
+  const soilGeo = new THREE.SphereGeometry(0.235, 28, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+  soilGeo.scale(1, 0.22, 1);
+  mesh(root, soilGeo, soilMat, [0, POT_TOP - 0.055, 0]);
+  for (let i = 0; i < 26; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.random() * 0.2;
+    const s = 0.012 + Math.random() * 0.018;
+    const stone = mesh(
+      root,
+      new THREE.DodecahedronGeometry(s, 0),
+      pebble,
+      [Math.cos(a) * r, POT_TOP - 0.05 + Math.cos(r * 8) * 0.006, Math.sin(a) * r],
+      [Math.random() * 3, Math.random() * 3, Math.random() * 3],
+    );
+    stone.scale.set(1, 0.6, 1);
+  }
+
+  // --- leaves ---------------------------------------------------------------
+  // One quad per leaf, cupped along its width and drooping along its length, so
+  // a flat cut-out still catches light across the blade instead of flashing on
+  // and off as the turntable brings it edge-on.
+  const leafGeo = (w: number, h: number): THREE.BufferGeometry => {
+    const geo = new THREE.PlaneGeometry(w, h, 5, 7);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const u = x / (w / 2);
+      const v = (y + h / 2) / h;
+      // Cup across the blade, and let the tip fall away.
+      pos.setZ(i, -u * u * h * 0.09 - (1 - v) * (1 - v) * h * 0.16);
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    return geo;
+  };
+
+  const LEAVES: [number, number, number, number, number][] = [
+    // yaw, tilt from vertical, petiole length, leaf size, roll
+    [0.0, 0.62, 0.5, 0.46, 0.1],
+    [0.9, 0.95, 0.62, 0.52, -0.2],
+    [1.8, 0.5, 0.42, 0.4, 0.25],
+    [2.6, 1.1, 0.7, 0.56, 0.15],
+    [3.5, 0.35, 0.34, 0.34, -0.1],
+    [4.3, 0.85, 0.58, 0.48, 0.3],
+    [5.1, 1.05, 0.66, 0.5, -0.25],
+    [5.8, 0.25, 0.3, 0.3, 0.05],
+    [1.3, 0.15, 0.52, 0.32, 0.4],
+    [4.0, 0.2, 0.6, 0.36, -0.35],
+  ];
+
+  for (const [yaw, tilt, len, span, roll] of LEAVES) {
+    const dir = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+    const base = new THREE.Vector3(dir.x * 0.05, POT_TOP - 0.05, dir.z * 0.05);
+    // The petiole arcs: out and up from the compost, then over at the tip.
+    const tipUp = Math.cos(tilt) * len;
+    const tipOut = Math.sin(tilt) * len;
+    const points: [number, number, number][] = [
+      [base.x, base.y - 0.02, base.z],
+      [base.x + dir.x * tipOut * 0.18, base.y + tipUp * 0.42, base.z + dir.z * tipOut * 0.18],
+      [base.x + dir.x * tipOut * 0.62, base.y + tipUp * 0.85, base.z + dir.z * tipOut * 0.62],
+      [base.x + dir.x * tipOut, base.y + tipUp, base.z + dir.z * tipOut],
+    ];
+    mesh(root, tube(points, 0.011, 10), stemMat);
+
+    const leaf = new THREE.Mesh(leafGeo(span, span * 1.24), leafMat);
+    const tip = new THREE.Vector3(points[3][0], points[3][1], points[3][2]);
+    leaf.position.copy(tip).addScaledVector(dir, span * 0.45).setY(tip.y - span * 0.2);
+    leaf.rotation.order = 'YXZ';
+    leaf.rotation.y = -yaw + Math.PI / 2;
+    // The blade hangs roughly horizontal on a drooping petiole.
+    leaf.rotation.x = -Math.PI / 2 + tilt * 0.55;
+    leaf.rotation.z = roll;
+    leaf.castShadow = true;
+    leaf.receiveShadow = true;
+    root.add(leaf);
+    // The geometry is per-leaf, so it has to be tracked for disposal.
+    store.geometries.push(leaf.geometry);
+  }
+
+  store.geometries.push(potGeo, saucerGeo, soilGeo);
+
+  return {
+    root,
+    size: new THREE.Vector3(1.5, 1.35, 1.5),
+    hinges: [],
+    lights: [],
+    dispose: () => {
+      disposer(store)();
+      leafTex.dispose();
+    },
+  };
+}
+
+// --------------------------------------------------------------- typewriter
+
+/**
+ * A 1930s desk typewriter.
+ *
+ * This one is here for the material rather than the shape. Every other piece in
+ * the studio is showroom-new, which is the easy case: one surface per part.
+ * A machine that has been used is a *stack* — steel, enamel over most of it,
+ * grime settled into whatever the enamel did not cover — and `layeredSurface`
+ * blends all three ORM channels through the wear mask, so a chip changes the
+ * colour and the roughness and the metalness at once.
+ *
+ * The keys are also an atlas exercise: forty-odd keytops share one geometry,
+ * one material and one texture, each with its glyph selected by baked UVs
+ * rather than by a per-key material.
+ */
+/** Typebar angles: parked just clear of the shell, and up at the platen. */
+export const TYPEBAR_REST = 0.24;
+export const TYPEBAR_STRUCK = 0.86;
+
+export function buildTypewriter(): Showpiece {
+  const store = newStore();
+  const root = new THREE.Group();
+  root.name = 'typewriter';
+
+  const enamel = wornEnamelSurface(2.4);
+  store.surfaces.push(enamel);
+  const bodyMat = track(store, surfaceMaterial(enamel, { clearcoat: 0.25, clearcoatRoughness: 0.45 }));
+
+  const nickel = track(
+    store,
+    // Tarnished, not chromed: a mirror finish on a ninety-year-old machine is
+    // the giveaway that nobody thought about the material.
+    new THREE.MeshPhysicalMaterial({ color: 0xb2b6ba, metalness: 1, roughness: 0.28 }),
+  );
+  const blackMetal = track(
+    store,
+    new THREE.MeshPhysicalMaterial({ color: 0x17191c, metalness: 0.35, roughness: 0.5 }),
+  );
+  const platenMat = track(
+    store,
+    // Perished rubber: matte, slightly grey-bloomed.
+    new THREE.MeshPhysicalMaterial({ color: 0x2a2723, metalness: 0, roughness: 0.88 }),
+  );
+  const paperMat = track(
+    store,
+    new THREE.MeshPhysicalMaterial({ color: 0xb8b3a6, metalness: 0, roughness: 0.95, side: THREE.DoubleSide }),
+  );
+  const ribbonMat = track(
+    store,
+    new THREE.MeshPhysicalMaterial({ color: 0x1d1a18, metalness: 0, roughness: 0.7 }),
+  );
+
+  // --- key glyph atlas ------------------------------------------------------
+  const COLS = 8;
+  const ROWS = 6;
+  const GLYPHS = 'QWERTYUIOPASDFGHJKLZXCVBNM1234567890.,;:?-+@&%$#*!/'.split('');
+  const keyTex = createCanvasTexture(1024, (ctx, size) => {
+    const cw = size / COLS;
+    const ch = size / ROWS;
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const i = r * COLS + c;
+        const x = c * cw;
+        const y = r * ch;
+        ctx.fillStyle = '#111316';
+        ctx.fillRect(x, y, cw, ch);
+        // The white ring that edges a period keytop.
+        ctx.strokeStyle = '#cdc7b8';
+        ctx.lineWidth = size * 0.004;
+        ctx.beginPath();
+        ctx.arc(x + cw / 2, y + ch / 2, Math.min(cw, ch) * 0.42, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = '#e8e2d2';
+        ctx.font = `bold ${ch * 0.42}px Georgia, serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(GLYPHS[i % GLYPHS.length], x + cw / 2, y + ch / 2 + ch * 0.02);
+      }
+    }
+  });
+
+  /**
+   * A keytop whose top face samples one cell of the atlas.
+   *
+   * Rewriting the UVs is what keeps this to one draw call. Giving each key its
+   * own material would be forty materials and forty uploads of the same image
+   * to say the same thing.
+   */
+  const keyGeo = (glyphIndex: number): THREE.BufferGeometry => {
+    const geo = new THREE.CylinderGeometry(0.0165, 0.019, 0.008, 16, 1);
+    const uv = geo.attributes.uv;
+    const pos = geo.attributes.position;
+    const col = glyphIndex % COLS;
+    const row = Math.floor(glyphIndex / COLS) % ROWS;
+    for (let i = 0; i < uv.count; i++) {
+      // Only the top cap carries the glyph; the side wall gets a dark corner
+      // of the same cell so it stays on the one texture.
+      if (pos.getY(i) > 0.0035) {
+        const u = uv.getX(i);
+        const v = uv.getY(i);
+        uv.setXY(i, (col + u) / COLS, 1 - (row + 1 - v) / ROWS);
+      } else {
+        uv.setXY(i, (col + 0.03) / COLS, 1 - (row + 0.97) / ROWS);
+      }
+    }
+    uv.needsUpdate = true;
+    return geo;
+  };
+
+  // --- body -----------------------------------------------------------------
+  const bodyGeo = loft([
+    { z: -0.16, halfWidth: 0.16, bottom: 0.012, top: 0.10, chamfer: 0.03, topHalfWidth: 0.13, bottomHalfWidth: 0.14 },
+    { z: -0.09, halfWidth: 0.175, bottom: 0.006, top: 0.135, chamfer: 0.035, topHalfWidth: 0.145, bottomHalfWidth: 0.155 },
+    { z: 0.0, halfWidth: 0.178, bottom: 0.004, top: 0.125, chamfer: 0.035, topHalfWidth: 0.15, bottomHalfWidth: 0.16 },
+    { z: 0.08, halfWidth: 0.172, bottom: 0.004, top: 0.085, chamfer: 0.03, topHalfWidth: 0.15, bottomHalfWidth: 0.155 },
+    { z: 0.15, halfWidth: 0.162, bottom: 0.004, top: 0.05, chamfer: 0.02, topHalfWidth: 0.145, bottomHalfWidth: 0.145 },
+  ]);
+  mesh(root, bodyGeo, bodyMat);
+  store.geometries.push(bodyGeo);
+
+  // Feet.
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      mesh(root, new THREE.CylinderGeometry(0.016, 0.018, 0.014, 12), platenMat, [
+        sx * 0.13,
+        0.007,
+        sz * 0.12,
+      ]);
+    }
+  }
+
+  // Side panels with the maker's name.
+  const badgeTex = createCanvasTexture(256, (ctx, size) => {
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = '#c9a24a';
+    ctx.font = `italic bold ${size * 0.3}px Georgia, serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Halden', size / 2, size / 2);
+  });
+  const badgeMat = track(
+    store,
+    new THREE.MeshPhysicalMaterial({
+      map: badgeTex,
+      alphaTest: 0.4,
+      color: 0xffffff,
+      metalness: 0.9,
+      roughness: 0.32,
+      side: THREE.DoubleSide,
+    }),
+  );
+  mesh(root, new THREE.PlaneGeometry(0.13, 0.033), badgeMat, [0, 0.108, -0.163]);
+
+  // --- carriage -------------------------------------------------------------
+  // Slides left as you type; this is the group the interaction animates.
+  const carriage = new THREE.Group();
+  carriage.name = 'carriage';
+  carriage.position.set(0, 0.148, -0.075);
+  root.add(carriage);
+
+  mesh(carriage, rounded(0.36, 0.014, 0.052, 0.005), blackMetal);
+  mesh(carriage, new THREE.CylinderGeometry(0.006, 0.006, 0.38, 10), nickel, [0, 0.028, 0.028], [0, 0, Math.PI / 2]);
+
+  const platen = new THREE.Group();
+  platen.position.set(0, 0.042, 0);
+  carriage.add(platen);
+  mesh(platen, new THREE.CylinderGeometry(0.032, 0.032, 0.3, 28), platenMat, [0, 0, 0], [0, 0, Math.PI / 2]);
+  for (const sx of [-1, 1]) {
+    mesh(platen, new THREE.CylinderGeometry(0.038, 0.038, 0.018, 20), blackMetal, [sx * 0.157, 0, 0], [0, 0, Math.PI / 2]);
+    // Knurled end knob.
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * Math.PI * 2;
+      mesh(platen, new THREE.BoxGeometry(0.019, 0.004, 0.004), blackMetal, [
+        sx * 0.157,
+        Math.cos(a) * 0.037,
+        Math.sin(a) * 0.037,
+      ], [a, 0, 0]);
+    }
+  }
+  // Paper: fed round the platen and standing up behind it.
+  const SHEET_H = 0.2;
+  const sheet = new THREE.Mesh(new THREE.PlaneGeometry(0.2, SHEET_H, 1, 8), paperMat);
+  const spos = sheet.geometry.attributes.position;
+  for (let i = 0; i < spos.count; i++) {
+    const v = (spos.getY(i) + SHEET_H / 2) / SHEET_H;
+    // Curls forward at the bottom, where it comes off the platen.
+    spos.setZ(i, -Math.pow(1 - v, 2) * 0.055);
+  }
+  spos.needsUpdate = true;
+  sheet.geometry.computeVertexNormals();
+  sheet.position.set(0, 0.085, -0.05);
+  sheet.rotation.x = -0.14;
+  sheet.castShadow = true;
+  carriage.add(sheet);
+  store.geometries.push(sheet.geometry);
+
+  // Paper bail and its rollers.
+  mesh(carriage, new THREE.CylinderGeometry(0.0035, 0.0035, 0.26, 8), nickel, [0, 0.056, -0.036], [0, 0, Math.PI / 2]);
+  for (const sx of [-1, 0, 1]) {
+    mesh(carriage, new THREE.CylinderGeometry(0.007, 0.007, 0.026, 10), platenMat, [sx * 0.08, 0.056, -0.036], [0, 0, Math.PI / 2]);
+  }
+  // Carriage return lever.
+  const lever = mesh(carriage, new THREE.CylinderGeometry(0.004, 0.004, 0.11, 8), nickel, [-0.2, 0.03, 0.01], [0, 0, 0.5]);
+  lever.rotation.z = 1.05;
+  mesh(carriage, rounded(0.045, 0.008, 0.014, 0.004), blackMetal, [-0.235, 0.062, 0.01]);
+
+  // --- typebar basket -------------------------------------------------------
+  // Fanned arms behind the keys; the struck one swings up to the platen.
+  // The pivot sits low and forward, the arm reaches back and up toward the
+  // printing point at the front of the platen. Rest angle is set so the tips
+  // clear the shell — a basket tucked entirely inside the body is what a real
+  // machine has, but it also means the fan is invisible until something is
+  // struck, and this is a display piece.
+  const typebars: THREE.Group[] = [];
+  const BAR_COUNT = 21;
+  for (let i = 0; i < BAR_COUNT; i++) {
+    const t = i / (BAR_COUNT - 1) - 0.5;
+    const pivot = new THREE.Group();
+    pivot.name = `typebar${i}`;
+    pivot.position.set(t * 0.14, 0.115, 0.005);
+    pivot.rotation.y = -t * 1.0;
+    root.add(pivot);
+    mesh(pivot, new THREE.BoxGeometry(0.0045, 0.0035, 0.085), nickel, [0, 0, -0.043]);
+    // The type slug on the end.
+    mesh(pivot, rounded(0.009, 0.009, 0.007, 0.002), blackMetal, [0, 0, -0.085]);
+    pivot.rotation.x = TYPEBAR_REST;
+    typebars.push(pivot);
+  }
+
+  // Type guide, sitting in the throat where the bars converge.
+  mesh(root, rounded(0.03, 0.016, 0.01, 0.003), nickel, [0, 0.142, -0.056]);
+
+  // --- ribbon spools --------------------------------------------------------
+  for (const sx of [-1, 1]) {
+    mesh(root, new THREE.CylinderGeometry(0.028, 0.028, 0.012, 20), nickel, [sx * 0.105, 0.132, -0.028]);
+    mesh(root, new THREE.CylinderGeometry(0.024, 0.024, 0.016, 20), ribbonMat, [sx * 0.105, 0.136, -0.028]);
+    mesh(root, new THREE.CylinderGeometry(0.005, 0.005, 0.03, 10), nickel, [sx * 0.105, 0.142, -0.028]);
+  }
+  mesh(root, new THREE.BoxGeometry(0.19, 0.011, 0.002), ribbonMat, [0, 0.126, -0.045]);
+
+  // --- keyboard -------------------------------------------------------------
+  // Four staggered rows, each on a stem, each a pivot the interaction presses.
+  const keys: { node: THREE.Group; rest: number }[] = [];
+  // One material, one texture, one upload — the whole point of the atlas.
+  const capMat = track(
+    store,
+    new THREE.MeshPhysicalMaterial({
+      map: keyTex,
+      metalness: 0.1,
+      roughness: 0.38,
+      clearcoat: 0.5,
+      clearcoatRoughness: 0.25,
+    }),
+  );
+  const ROW_COUNTS = [10, 9, 8, 7];
+  let glyph = 0;
+  for (let r = 0; r < ROW_COUNTS.length; r++) {
+    const count = ROW_COUNTS[r];
+    const z = 0.055 + r * 0.028;
+    // The body's top surface falls away toward the player: it is at y 0.125 at
+    // z 0, 0.085 at z 0.08 and 0.05 at z 0.15. Keys placed on a flat plane
+    // below that line disappear *inside* the shell, which is what happened the
+    // first time — the keyboard rendered as four nickel dots.
+    const y = 0.116 - r * 0.0185;
+    for (let c = 0; c < count; c++) {
+      const x = (c - (count - 1) / 2) * 0.0345 + (r % 2 ? 0.008 : 0);
+      const node = new THREE.Group();
+      node.name = `key${keys.length}`;
+      node.position.set(x, y, z);
+      root.add(node);
+      const geo = keyGeo(glyph++);
+      const cap = new THREE.Mesh(geo, capMat);
+      cap.castShadow = true;
+      cap.receiveShadow = true;
+      node.add(cap);
+      store.geometries.push(geo);
+      // The stem down into the body.
+      mesh(node, new THREE.CylinderGeometry(0.0022, 0.0022, 0.03, 8), nickel, [0, -0.018, 0.004], [0.35, 0, 0]);
+      keys.push({ node, rest: y });
+    }
+  }
+  // Space bar.
+  const spaceNode = new THREE.Group();
+  spaceNode.name = `key${keys.length}`;
+  spaceNode.position.set(0, 0.048, 0.163);
+  root.add(spaceNode);
+  mesh(spaceNode, rounded(0.16, 0.008, 0.014, 0.003), blackMetal);
+  keys.push({ node: spaceNode, rest: 0.036 });
+
+  return {
+    root,
+    size: new THREE.Vector3(0.42, 0.3, 0.42),
+    hinges: [],
+    lights: [],
+    typing: { keys, typebars, carriage, carriageRest: carriage.position.x },
+    dispose: () => {
+      disposer(store)();
+      keyTex.dispose();
+      badgeTex.dispose();
+    },
+  };
+}
+
+// ----------------------------------------------------------- decanter set
+
+/**
+ * Cut-crystal decanter, two tumblers and a tray.
+ *
+ * Almost no geometry, and that is deliberate: this piece is a shading test.
+ * The parts it exercises are the ones the other showpieces never touch:
+ *
+ * - **`attenuationColor` / `attenuationDistance`** — Beer-Lambert absorption
+ *   through the volume, so the whisky darkens with the path length through it.
+ *   A shallow pour is pale and the belly of the decanter is deep amber, from
+ *   one material with no gradient painted anywhere.
+ * - **`dispersion`** — wavelength-dependent IOR, which is where the fire in a
+ *   cut lead crystal comes from.
+ * - **One volume per vessel, split at the fill line.** The textbook model is a
+ *   liquid shell at IOR 1.36 nested inside a glass shell at 1.55, and it does
+ *   not render here at all: three.js transmission refracts a backdrop that
+ *   contains only the *opaque* scene, so a transmissive liquid inside a
+ *   transmissive glass is in nobody's backdrop and is simply invisible.
+ *   Measured — the pour came out neutral grey while the same absorption on a
+ *   free-standing ball came out amber.
+ *
+ *   So each vessel is two stacked solids instead: below the fill line one
+ *   volume carrying the whisky's absorption, above it a hollow crystal shell.
+ *   That is what the eye receives anyway — glass, whisky and glass again read
+ *   as one amber body — and it survives a renderer that only refracts once.
+ *
+ * The limit that remains: nothing refracts twice, so a tumbler seen through the
+ * decanter does not bend. That needs a different renderer, not more tuning.
+ */
+export function buildDecanterSet(): Showpiece {
+  const store = newStore();
+  const root = new THREE.Group();
+  root.name = 'decanter';
+
+  const crystal = track(
+    store,
+    new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      metalness: 0,
+      roughness: 0.03,
+      transmission: 1,
+      thickness: 0.05,
+      ior: 1.55,
+      // Lead crystal is not water-clear; it carries the faintest grey.
+      attenuationColor: new THREE.Color(0xf2f6f4),
+      attenuationDistance: 0.9,
+      dispersion: 1.6,
+      specularIntensity: 1,
+      envMapIntensity: 1.4,
+      side: THREE.DoubleSide,
+    }),
+  );
+  const whisky = track(
+    store,
+    new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      metalness: 0,
+      roughness: 0.02,
+      transmission: 1,
+      thickness: 0.1,
+      // Between glass and spirit, because this one volume stands in for both.
+      ior: 1.48,
+      // The amber is absorption, not albedo: short distance, saturated colour.
+      // Beer-Lambert then does the rest — the belly is deep and the shoulder,
+      // where the volume is thin, is pale, from a single flat parameter.
+      attenuationColor: new THREE.Color(0xe09a34),
+      attenuationDistance: 0.115,
+      envMapIntensity: 1.2,
+    }),
+  );
+  // Blended, not transmissive, for the same reason: ice sitting in the drink
+  // would be a transmissive object behind a transmissive one and would vanish.
+  // Alpha blending renders after the transmissive pass, so it survives.
+  const ice = track(
+    store,
+    new THREE.MeshPhysicalMaterial({
+      color: 0xdff0ff,
+      metalness: 0,
+      roughness: 0.32,
+      ior: 1.31,
+      transparent: true,
+      opacity: 0.62,
+      envMapIntensity: 1.3,
+    }),
+  );
+
+  const walnut = walnutSurface(5);
+  store.surfaces.push(walnut);
+  const trayMat = track(store, surfaceMaterial(walnut, { clearcoat: 0.4, clearcoatRoughness: 0.25 }));
+  const brass = track(
+    store,
+    new THREE.MeshPhysicalMaterial({ color: 0xb08d42, metalness: 1, roughness: 0.3 }),
+  );
+
+  const lathe = (points: [number, number][], segments: number): THREE.BufferGeometry => {
+    const geo = new THREE.LatheGeometry(
+      points.map(([x, y]) => new THREE.Vector2(x, y)),
+      segments,
+    );
+    store.geometries.push(geo);
+    return geo;
+  };
+
+  // --- tray -----------------------------------------------------------------
+  mesh(root, rounded(0.42, 0.016, 0.3, 0.006), trayMat, [0, 0.008, 0]);
+  for (const sx of [-1, 1]) {
+    mesh(root, rounded(0.012, 0.022, 0.3, 0.004), trayMat, [sx * 0.204, 0.019, 0]);
+  }
+  for (const sz of [-1, 1]) {
+    mesh(root, rounded(0.42, 0.022, 0.012, 0.004), trayMat, [0, 0.019, sz * 0.144]);
+  }
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      mesh(root, new THREE.CylinderGeometry(0.007, 0.007, 0.006, 10), brass, [sx * 0.19, 0.003, sz * 0.13]);
+    }
+  }
+
+  // --- decanter -------------------------------------------------------------
+  const DEC = new THREE.Group();
+  DEC.position.set(-0.1, 0.016, 0);
+  root.add(DEC);
+
+  // Low segment count on the body is the cut: a crystal decanter is faceted,
+  // and a smooth lathe here throws away the whole reason for the dispersion.
+  //
+  // Split at the fill line: the belly is one solid carrying the whisky's
+  // absorption, the shoulder and neck a hollow crystal shell above it. They
+  // share a silhouette, so the join reads as the surface of the pour.
+  const LEVEL = 0.105;
+  mesh(
+    DEC,
+    lathe(
+      [
+        [0.0, 0.0],
+        [0.058, 0.0],
+        [0.07, 0.012],
+        [0.076, 0.05],
+        [0.0745, LEVEL],
+        [0.0, LEVEL],
+      ],
+      12,
+    ),
+    whisky,
+  );
+  mesh(
+    DEC,
+    lathe(
+      // A closed ring section — first point repeated at the end — rather than
+      // one that starts and ends on the axis, which lays two coincident discs
+      // across the fill line and z-fights them.
+      [
+        [0.0745, LEVEL],
+        [0.062, 0.14],
+        [0.04, 0.168],
+        [0.028, 0.186],
+        [0.026, 0.215],
+        [0.032, 0.232],
+        [0.03, 0.238],
+        [0.023, 0.232],
+        [0.02, 0.19],
+        [0.032, 0.166],
+        [0.055, 0.135],
+        [0.0655, LEVEL],
+        [0.0745, LEVEL],
+      ],
+      12,
+    ),
+    crystal,
+  );
+
+  // Faceted stopper.
+  const stopperGeo = new THREE.SphereGeometry(0.036, 8, 5);
+  store.geometries.push(stopperGeo);
+  mesh(DEC, stopperGeo, crystal, [0, 0.268, 0]);
+  mesh(DEC, lathe([[0, 0], [0.021, 0], [0.021, 0.03], [0, 0.03]], 10), crystal, [0, 0.234, 0]);
+
+  // --- tumblers -------------------------------------------------------------
+  const POUR = 0.048;
+  // Below the pour: one filled volume. Above it: the hollow glass.
+  const drinkGeo = lathe(
+    [
+      [0.0, 0.0],
+      [0.038, 0.0],
+      [0.042, 0.008],
+      [0.043, 0.02],
+      [0.0415, POUR],
+      [0.0, POUR],
+    ],
+    10,
+  );
+  const tumblerGeo = lathe(
+    [
+      [0.0415, POUR],
+      [0.041, 0.06],
+      [0.04, 0.082],
+      [0.036, 0.082],
+      [0.037, 0.055],
+      [0.0365, POUR],
+      [0.0415, POUR],
+    ],
+    10,
+  );
+  const cubeGeo = new THREE.BoxGeometry(0.019, 0.019, 0.019);
+  store.geometries.push(cubeGeo);
+
+  for (const [x, z, rot, cubes] of [
+    [0.1, -0.055, 0.4, 2],
+    [0.115, 0.06, -0.7, 1],
+  ] as [number, number, number, number][]) {
+    const g = new THREE.Group();
+    g.position.set(x, 0.016, z);
+    g.rotation.y = rot;
+    root.add(g);
+    mesh(g, tumblerGeo, crystal);
+    mesh(g, drinkGeo, whisky);
+    for (let i = 0; i < cubes; i++) {
+      const cube = mesh(g, cubeGeo, ice, [
+        (i - (cubes - 1) / 2) * 0.018,
+        0.05 + i * 0.014,
+        i * 0.004,
+      ], [0.4 + i, 0.7 * i, 0.2]);
+      cube.castShadow = false;
+    }
+  }
+
+  return {
+    root,
+    size: new THREE.Vector3(0.46, 0.32, 0.34),
+    hinges: [],
+    lights: [],
     dispose: disposer(store),
   };
 }

@@ -129,7 +129,7 @@ export class Menu {
             a full shooting range; a race circuit whose garage holds a hypercar, a 4x4 and a tank —
             all three drivable with lap timing and a working 120 mm gun on the tank — plus a pilotable
             Terran assault mech that walks, twists its torso and fires twin arm cannons; and a model
-            studio, a PBR test scene with an area-light rig, reference charts and three showpieces.
+            studio, a PBR test scene with an area-light rig, reference charts and six showpieces.
           </p>
 
           <h2>Controls</h2>
