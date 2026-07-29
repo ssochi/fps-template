@@ -49,7 +49,7 @@ const SHOTS = [
   { name: '12-looting', rotation: 0, zoom: 1, loot: true },
   // A barricaded window with the dead working on it, at night with a torch lit.
   { name: '13-siege', rotation: 0, zoom: 0, siege: true },
-  { name: '14-death', rotation: 0, zoom: 2, death: true },
+  { name: '14-death', rotation: 0, zoom: 2, death: true, skills: true },
 ];
 
 const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
@@ -224,10 +224,17 @@ try {
           Math.floor(window.__knox.clock.elapsed / 86400) * 86400 + s.hour * 3600;
       }
       if (s.death) {
+        // Give the run a history, so the report shows what it is meant to.
+        const sk = window.__knox.skills;
+        sk.award('blunt', 900);
+        sk.award('carpentry', 240);
+        sk.award('scavenging', 90);
         window.__knox.hud.showDeath({
           cause: 'Torn apart',
           days: '3 days',
           kills: window.__knox.combat.stats.kills,
+          skills: sk.summary().filter((x) => x.level > 0),
+          onRestart: () => {},
         });
       }
       if (s.fight) {

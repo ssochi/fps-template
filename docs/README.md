@@ -26,4 +26,5 @@ Development runs as a **milestone loop**:
 
 ## Current cycle
 
-Cycle 1 — M0 … M10. M0–M9 complete.
+Cycle 1 — M0 … M10. **Complete.** M11 opens cycle 2 with a fresh Exploration
+milestone.

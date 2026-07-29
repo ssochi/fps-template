@@ -31,6 +31,9 @@ export class Hud {
       this._flash = { until: performance.now() + 320, kind };
     });
     this._offDeath = events.on('player:died', (e) => this.showDeath(e));
+    this._offLevel = events.on('skill:levelled', ({ name, level }) => {
+      this._toast = { text: `${name} ${level}`, until: performance.now() + 2600 };
+    });
   }
 
   _build() {
@@ -46,6 +49,7 @@ export class Hud {
       <div id="hud-right">
         <div id="hud-moodles"></div>
         <div id="hud-body"></div>
+        <div id="hud-skills"></div>
       </div>
       <div id="hud-bottom">
         <div id="hud-bars">
@@ -60,7 +64,7 @@ export class Hud {
 
     for (const id of [
       'hud-clock', 'hud-debug', 'hud-moodles', 'hud-body', 'hud-weapon',
-      'bar-health', 'bar-endurance', 'hud-death',
+      'bar-health', 'bar-endurance', 'hud-death', 'hud-skills',
     ]) {
       this.el[id] = this.root.querySelector(`#${id}`);
     }
@@ -73,8 +77,14 @@ export class Hud {
    * @param {import('../sim/Moodles.js').Moodles} s.moodles
    * @param {string} s.debug
    */
-  update({ clock, player, moodles, debug }) {
+  update({ clock, player, moodles, debug, skills }) {
     this.el['hud-clock'].textContent = `${clock.format()}  ·  ${clock.formatDate()}`;
+
+    const toast = this._toast && performance.now() < this._toast.until ? this._toast.text : '';
+    if (toast !== this._toastShown) {
+      this._toastShown = toast;
+      this.el['hud-skills'].dataset.toast = toast;
+    }
     this.el['hud-debug'].textContent = debug;
 
     this._renderMoodles(moodles);
@@ -88,11 +98,24 @@ export class Hud {
     this.el['bar-endurance'].style.width = `${(end * 100).toFixed(1)}%`;
     this.el['bar-endurance'].style.background = player.winded ? '#c96f4a' : '#5f8592';
 
+    if (skills) this._renderSkills(skills);
+
     const w = player.weapon;
     const cond = Math.round(w.conditionFraction * 100);
     this.el['hud-weapon'].innerHTML =
       `<b>${w.def.name}</b>${w.broken ? ' <em>broken</em>' : ` <span>${cond}%</span>`}` +
       (moodles.asleep ? ' &nbsp;·&nbsp; <em>asleep</em>' : '');
+  }
+
+  /** Only skills above zero: an empty sheet is noise. */
+  _renderSkills(skills) {
+    const learned = skills.summary().filter((s) => s.level > 0);
+    const html = learned
+      .map((s) => `<div class="skill"><span>${s.name}</span><b>${s.level}</b></div>`)
+      .join('');
+    if (html === this._skillHtml) return;
+    this._skillHtml = html;
+    this.el['hud-skills'].innerHTML = html;
   }
 
   _renderMoodles(moodles) {
@@ -143,9 +166,14 @@ export class Hud {
    * plainly and show how long you lasted, because those are the two things a
    * player wants when deciding whether to go again.
    */
-  showDeath({ cause, clock, kills, days }) {
+  showDeath({ cause, kills, days, skills = [], onRestart }) {
     const el = this.el['hud-death'];
     el.classList.remove('hidden');
+    // What you got good at is part of the report: it is the record of how you
+    // actually played, which is the thing worth reading back.
+    const learned = skills.length
+      ? `<p class="learned">${skills.map((s) => `${s.name} ${s.level}`).join(' · ')}</p>`
+      : '';
     el.innerHTML = `
       <div class="death-card">
         <h1>This is how you died</h1>
@@ -154,14 +182,18 @@ export class Hud {
           <div><dt>Survived</dt><dd>${days ?? '—'}</dd></div>
           <div><dt>Zombies killed</dt><dd>${kills ?? 0}</dd></div>
         </dl>
-        <p class="hint">Reload to begin again.</p>
+        ${learned}
+        <button id="death-restart">Begin again</button>
       </div>
     `;
+    const button = el.querySelector('#death-restart');
+    if (onRestart) button.addEventListener('click', onRestart);
   }
 
   dispose() {
     this._offWound();
     this._offDeath();
+    this._offLevel();
   }
 }
 
@@ -195,6 +227,14 @@ const CSS = `
 .part s { color: #d6b45a; text-decoration: none; }
 .infection { margin-top: 5px; color: #a97fd0; font-size: 11px; }
 
+#hud-skills {
+  margin-top: 8px; padding: 6px 8px; background: rgba(12,15,20,.55); border-radius: 3px;
+}
+#hud-skills:empty { display: none; }
+.skill { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; }
+.skill span { opacity: .6; }
+.skill b { font-weight: 400; color: #8fae86; }
+
 #hud-bottom { position: absolute; left: 12px; bottom: 12px; }
 #hud-bars { display: flex; gap: 14px; margin-bottom: 5px; }
 .bar { display: flex; align-items: center; gap: 6px; }
@@ -223,5 +263,12 @@ const CSS = `
 .death-card dl { display: flex; justify-content: center; gap: 34px; margin: 0 0 20px; }
 .death-card dt { opacity: .5; font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
 .death-card dd { margin: 2px 0 0; font-size: 16px; }
-.death-card .hint { opacity: .4; font-size: 11px; }
+.death-card .learned { opacity: .55; font-size: 11px; margin: 0 0 18px; }
+.death-card button {
+  font: inherit; color: #d8dee4; background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.16); border-radius: 3px;
+  padding: 7px 20px; cursor: pointer; letter-spacing: .1em; text-transform: uppercase;
+  font-size: 11px;
+}
+.death-card button:hover { background: rgba(255,255,255,.12); }
 `;

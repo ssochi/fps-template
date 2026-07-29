@@ -106,6 +106,14 @@ export class Horde {
     this.vz = new Float32Array(capacity);
     /** Which limbs have been taken off, as a bitmask. Purely cosmetic for now. */
     this.dismembered = new Uint8Array(capacity);
+    /**
+     * Seconds of hit flash remaining.
+     *
+     * M6 shipped with a landed swing and a missed one looking identical, which
+     * made combat feel like nothing was happening. This is the cheapest possible
+     * fix: brighten the instance tint for a fifth of a second.
+     */
+    this.hitFlash = new Float32Array(capacity);
 
     this.clock = 0;
     this.stats = { alive: 0, dead: 0, chasing: 0, investigating: 0, attacking: 0 };
@@ -127,6 +135,7 @@ export class Horde {
     this.vx[i] = 0;
     this.vz[i] = 0;
     this.dismembered[i] = 0;
+    this.hitFlash[i] = 0;
     this.pace[i] = this.rng.range(0.78, 1.24);
     this.phase[i] = this.rng.next();
     this._wanderDir[i] = this.rng.int(0, 3);
@@ -184,6 +193,7 @@ export class Horde {
       const tz = Math.floor(this.z[i]);
 
       if (this.cooldown[i] > 0) this.cooldown[i] -= dt;
+      if (this.hitFlash[i] > 0) this.hitFlash[i] = Math.max(0, this.hitFlash[i] - dt);
 
       // Knockback runs regardless of state, so a staggered zombie still slides.
       if (this.vx[i] !== 0 || this.vz[i] !== 0) {
@@ -303,6 +313,7 @@ export class Horde {
     if (this.state[i] === STATE.DEAD) return { killed: false, dismembered: false };
 
     this.health[i] -= amount;
+    this.hitFlash[i] = 0.2;
     this.vx[i] += dirX * knockback * 7;
     this.vz[i] += dirZ * knockback * 7;
 
@@ -435,9 +446,11 @@ export class Horde {
       clip[o + 2] = timeOffset;
       clip[o + 3] = rate;
 
-      tint[n * 3] = this.tint[i * 3];
-      tint[n * 3 + 1] = this.tint[i * 3 + 1];
-      tint[n * 3 + 2] = this.tint[i * 3 + 2];
+      // A hit washes the instance toward red-white for a moment.
+      const flash = this.hitFlash[i] > 0 ? this.hitFlash[i] / 0.2 : 0;
+      tint[n * 3] = this.tint[i * 3] + flash * 1.5;
+      tint[n * 3 + 1] = this.tint[i * 3 + 1] + flash * 0.35;
+      tint[n * 3 + 2] = this.tint[i * 3 + 2] + flash * 0.3;
       n++;
     }
 
