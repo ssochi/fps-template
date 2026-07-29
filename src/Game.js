@@ -148,6 +148,7 @@ export function createGame({
   }
 
   const construction = new Construction(world.grid, avatar, stations);
+  construction.loot = loot;
   // Blocked zombies work on whatever is in their way, so a barricade is a delay
   // rather than an off switch.
   const siege = new Siege(world.grid, horde.horde);

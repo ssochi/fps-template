@@ -372,6 +372,47 @@ export class TileGrid {
   }
 
   /**
+   * Restore a damaged barricade to full without adding a plank.
+   *
+   * Separate from `addPlank` because they are different decisions: adding a
+   * plank makes a barricade *stronger* and costs a plank you may not have,
+   * while repairing makes a damaged one whole again and costs nails. A base
+   * that can only ever be reinforced and never mended runs down in one
+   * direction, which is a treadmill rather than a choice.
+   *
+   * @returns {boolean} whether anything needed doing
+   */
+  repairBarricade(x, z, level, dir, hpPerPlank) {
+    const b = this.barricadeAt(x, z, level, dir);
+    if (!b || b.planks <= 0) return false;
+    const full = b.planks * hpPerPlank;
+    if (b.hp >= full) return false;
+    if (b.side === 'N') this.barricadeHpN[b.index] = full;
+    else this.barricadeHpW[b.index] = full;
+    this._dirtyEdge(x, z, level, dir);
+    return true;
+  }
+
+  /**
+   * Take a barricade down, plank by plank.
+   * @returns {number} planks recovered (0 or 1)
+   */
+  removePlank(x, z, level, dir, hpPerPlank) {
+    const b = this.barricadeAt(x, z, level, dir);
+    if (!b || b.planks <= 0) return 0;
+    const planks = b.planks - 1;
+    if (b.side === 'N') {
+      this.barricadeN[b.index] = planks;
+      this.barricadeHpN[b.index] = planks * hpPerPlank;
+    } else {
+      this.barricadeW[b.index] = planks;
+      this.barricadeHpW[b.index] = planks * hpPerPlank;
+    }
+    this._dirtyEdge(x, z, level, dir);
+    return 1;
+  }
+
+  /**
    * Nail a plank across an edge.
    * @returns {boolean} whether it went on
    */

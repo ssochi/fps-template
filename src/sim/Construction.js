@@ -19,13 +19,17 @@
 import { Vector3 } from 'three';
 import { DIR, DIR_VEC, worldToTile } from '../core/constants.js';
 import { WALL } from '../world/TileGrid.js';
-import { packObject } from '../world/Objects.js';
+import { OBJ, OBJECT_SPEC, objectId, packObject } from '../world/Objects.js';
+import { Item } from '../items/ItemDb.js';
 import { BARRICADE, OUTPUT, canCraft, consumeMaterials, produce } from '../items/Recipes.js';
 import { events } from '../core/Events.js';
 import { STATION } from './Stations.js';
 import { t } from '../ui/i18n.js';
 
 const _forward = new Vector3();
+
+/** Planks handed back for taking a piece of furniture apart. */
+const RECOVERED_PLANKS = 2;
 
 /** Damage a zombie does to planks per swing. */
 const ZOMBIE_PLANK_DAMAGE = 9;
@@ -46,14 +50,16 @@ export class Construction {
     this.stations = stations;
     /** The job in progress, if any. */
     this.job = null;
-    this.stats = { crafted: 0, barricades: 0, broken: 0, placed: 0 };
+    /** Set by the caller, so a crate you build starts empty. */
+    this.loot = null;
+    this.stats = { crafted: 0, barricades: 0, broken: 0, placed: 0, dismantled: 0, repaired: 0 };
   }
 
   /**
    * Which wall edge the player is facing, for barricading.
    * @returns {{ x: number, z: number, dir: number } | null}
    */
-  facingEdge() {
+  facingEdge(openEdge = false) {
     const p = this.player;
     const t = worldToTile(p.position.x, p.position.z);
     const fx = -Math.sin(p.yaw);
@@ -61,9 +67,67 @@ export class Construction {
     const dir = Math.abs(fx) > Math.abs(fz) ? (fx > 0 ? 1 : 3) : fz > 0 ? 2 : 0;
 
     const wall = this.grid.wallAt(t.x, t.z, p.level, dir);
+    if (openEdge) {
+      // Building a wall where there is none. The tile beyond has to exist and
+      // be somewhere you could otherwise have walked, or this is a wall across
+      // the void.
+      if (wall !== WALL.NONE) return null;
+      const v = DIR_VEC[dir];
+      if (!this.grid.isWalkable(t.x + v.dx, t.z + v.dz, p.level)) return null;
+      return { x: t.x, z: t.z, dir };
+    }
     // Only openings can be barricaded. Nailing planks to a solid brick wall is
     // not a thing, and offering it would be a trap for the player's materials.
     if (wall !== WALL.DOORWAY && wall !== WALL.WINDOW) return null;
+    return { x: t.x, z: t.z, dir };
+  }
+
+  /**
+   * What "take it down" would take down.
+   *
+   * Barricades and plank walls first, because they are on the edge you are
+   * facing and they are the thing you most often want gone; then an object you
+   * put there. Worldgen's own furniture is fair game too — a wardrobe is four
+   * planks if you are willing to spend six seconds and make a lot of noise.
+   *
+   * @returns {{ kind: 'barricade'|'object', x: number, z: number, dir?: number } | null}
+   */
+  dismantleTarget() {
+    const p = this.player;
+    const t = p.tile();
+    const fx = -Math.sin(p.yaw);
+    const fz = -Math.cos(p.yaw);
+    const dir = Math.abs(fx) > Math.abs(fz) ? (fx > 0 ? 1 : 3) : fz > 0 ? 2 : 0;
+
+    const barricade = this.grid.barricadeAt(t.x, t.z, p.level, dir);
+    if (barricade && barricade.planks > 0) {
+      return { kind: 'barricade', x: t.x, z: t.z, dir };
+    }
+
+    const v = DIR_VEC[dir];
+    for (const [x, z] of [[t.x + v.dx, t.z + v.dz], [t.x, t.z]]) {
+      const i = this.grid.index(x, z, p.level);
+      if (i < 0 || this.grid.object[i] === 0) continue;
+      const id = objectId(this.grid.object[i]);
+      // Doors and staircases are structure, not furniture. Letting a survivor
+      // dismantle the stairs they are standing on is a way to lose a run to a
+      // mis-click.
+      if (id === OBJ.DOOR || id === OBJ.STAIRS_LOW || id === OBJ.STAIRS_HIGH) continue;
+      return { kind: 'object', x, z, objectId: id };
+    }
+    return null;
+  }
+
+  /** A damaged barricade on the edge you are facing, or null. */
+  repairTarget() {
+    const p = this.player;
+    const t = p.tile();
+    const fx = -Math.sin(p.yaw);
+    const fz = -Math.cos(p.yaw);
+    const dir = Math.abs(fx) > Math.abs(fz) ? (fx > 0 ? 1 : 3) : fz > 0 ? 2 : 0;
+    const b = this.grid.barricadeAt(t.x, t.z, p.level, dir);
+    if (!b || b.planks <= 0) return null;
+    if (b.hp >= b.planks * BARRICADE.hpPerPlank) return null;
     return { x: t.x, z: t.z, dir };
   }
 
@@ -86,17 +150,28 @@ export class Construction {
 
     let edge = null;
     let spot = null;
+    let target = null;
     if (recipe.output === OUTPUT.BARRICADE) {
-      edge = this.facingEdge();
-      if (!edge) return 'face a window or doorway';
+      edge = this.facingEdge(recipe.openEdge);
+      if (!edge) {
+        return recipe.openEdge
+          ? t('craft.faceGap', 'face an open gap between two floors')
+          : t('craft.faceOpening', 'face a window or doorway');
+      }
       const existing = this.grid.barricadeAt(edge.x, edge.z, this.player.level, edge.dir);
       if (existing && existing.planks >= BARRICADE.maxPlanks) return 'already barricaded';
     } else if (recipe.output === OUTPUT.PLACE) {
       spot = this.placementSpot();
-      if (!spot) return 'no room in front of you';
+      if (!spot) return t('craft.noRoom', 'no room in front of you');
+    } else if (recipe.output === OUTPUT.DISMANTLE) {
+      target = this.dismantleTarget();
+      if (!target) return t('craft.faceSomething', 'face something you can take down');
+    } else if (recipe.output === OUTPUT.REPAIR) {
+      target = this.repairTarget();
+      if (!target) return t('craft.nothingBroken', 'nothing here needs repairing');
     }
 
-    this.job = { recipe, edge, spot, remaining: recipe.seconds ?? 2, noiseTimer: 0 };
+    this.job = { recipe, edge, spot, target, remaining: recipe.seconds ?? 2, noiseTimer: 0 };
     return null;
   }
 
@@ -176,21 +251,40 @@ export class Construction {
     if (!canCraft(recipe, this.player.inventory, this.player.weapon.def).ok) return;
     consumeMaterials(recipe, this.player.inventory);
 
+    if (recipe.output === OUTPUT.REPAIR && job.target) {
+      const { x, z, dir } = job.target;
+      this.grid.repairBarricade(x, z, this.player.level, dir, BARRICADE.hpPerPlank);
+      this.stats.repaired++;
+      events.emit('built:barricade', job.target);
+      return;
+    }
+
+    if (recipe.output === OUTPUT.DISMANTLE && job.target) {
+      this._dismantle(job.target);
+      return;
+    }
+
     if (recipe.output === OUTPUT.PLACE && job.spot) {
       const { x, z, level } = job.spot;
       this.grid.setObject(x, z, level, packObject(recipe.objectId, DIR.N));
       const kind = STATION[recipe.objectId];
       if (kind) this.stations?.add(x, z, level, kind);
+      // A crate you built is empty. Loot is a function of (seed, cell), which
+      // is right for a cupboard that predates the outbreak and wrong for one
+      // you nailed together thirty seconds ago.
+      if (OBJECT_SPEC[recipe.objectId]?.container) this.loot?.markPlaced(x, z, level);
       this.stats.placed++;
       events.emit('built:object', { x, z, level, objectId: recipe.objectId, kind });
       return;
     }
 
     if (recipe.output === OUTPUT.BARRICADE && edge) {
-      this.grid.addPlank(
-        edge.x, edge.z, this.player.level, edge.dir,
-        BARRICADE.hpPerPlank, BARRICADE.maxPlanks,
-      );
+      for (let n = 0; n < (recipe.planks ?? 1); n++) {
+        this.grid.addPlank(
+          edge.x, edge.z, this.player.level, edge.dir,
+          BARRICADE.hpPerPlank, BARRICADE.maxPlanks,
+        );
+      }
       this.stats.barricades++;
       events.emit('built:barricade', edge);
       return;
@@ -202,6 +296,25 @@ export class Construction {
       this.stats.crafted++;
       events.emit('crafted', { id: item.id, count: item.count });
     }
+  }
+
+  /** Pull something down and hand back most of the wood. */
+  _dismantle(target) {
+    const level = this.player.level;
+    if (target.kind === 'barricade') {
+      const got = this.grid.removePlank(target.x, target.z, level, target.dir, BARRICADE.hpPerPlank);
+      if (got > 0) this.player.inventory.add(new Item('plank', got));
+    } else {
+      const i = this.grid.index(target.x, target.z, level);
+      this.grid.setObject(target.x, target.z, level, 0);
+      this.stations?.byCell.delete(i);
+      // Most of it back, not all: taking something apart with a hammer costs
+      // you a plank, which is what stops build-and-dismantle being a way to
+      // turn time into materials.
+      this.player.inventory.add(new Item('plank', RECOVERED_PLANKS));
+    }
+    this.stats.dismantled++;
+    events.emit('dismantled', target);
   }
 
   get progress() {

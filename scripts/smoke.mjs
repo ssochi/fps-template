@@ -65,6 +65,9 @@ const SHOTS = [
   // mains dead — a fire for warmth and light, a barrel filling, a generator
   // running and shouting about it.
   { name: '18-camp', rotation: 0, zoom: 0, camp: true },
+  // M19: a base that was built rather than found. A plank wall closing a gap
+  // between two buildings, a crate, a bunk, and the dead working on the wall.
+  { name: '19-carpentry', rotation: 0, zoom: 0, carpentry: true },
 ];
 
 /**
@@ -147,7 +150,7 @@ try {
   await page.waitForFunction(() => window.__knox && window.__knox.loop.frame > 20, { timeout: 20000 });
 
   for (const shot of SHOTS) {
-    const setupResult = await page.evaluate((s) => {
+    const setupResult = await page.evaluate(async (s) => {
       const { isoCamera, avatar, town, world } = window.__knox;
       isoCamera.rotationStep = s.rotation;
       isoCamera.zoomStep = s.zoom;
@@ -387,6 +390,79 @@ try {
           sighted: meta.helicopter.sighted,
           x: meta.helicopter.x.toFixed(1),
         };
+      }
+
+      if (s.carpentry) {
+        const {
+          avatar: av, world: w, town: t, isoCamera: cam, clock: ck,
+          construction, loot: lootSys, horde: hs,
+        } = window.__knox;
+        const g = w.grid;
+        const cx = t.roads.vertical[1];
+        const cz = t.roads.horizontal[1] + 5;
+        av.level = 0;
+        av.position.set(cx + 0.5, 0, cz + 0.5);
+        av.syncLevelHeight();
+        ck.elapsed = Math.floor(ck.elapsed / 86400) * 86400 + 10 * 3600;
+        // Shot 18 leaves a storm running and the ease back takes half a minute,
+        // which a screenshot does not have. Clear sky, so the carpentry is
+        // actually visible.
+        window.__knox.weather.sky = 0;
+        window.__knox.weather.intensity = 0;
+        window.__knox.weather._target = 0;
+        window.__knox.renderer.setGloom(0);
+        window.__knox.renderer.setFire(null);
+
+        // Build a short run of plank wall across the open ground, using the
+        // real recipes rather than writing to the grid: the shot is meant to
+        // show that carpentry works, not that a mesher can draw planks.
+        const { Item } = await import('/src/items/ItemDb.js');
+        av.inventory.add(new Item('plank', 40));
+        av.inventory.add(new Item('nails', 20));
+        av.inventory.add(new Item('sheet', 4));
+        av.inventory.add(new Item('hammer'));
+
+        const run = (recipeId, x, z, yaw) => {
+          av.position.set(x + 0.5, 0, z + 0.5);
+          av.setYaw(yaw);
+          const RECIPES = window.__knox.__recipes;
+          const reason = construction.begin(RECIPES[recipeId]);
+          if (reason) return reason;
+          construction.update(60);
+          return null;
+        };
+        const { RECIPE_BY_ID } = await import('/src/items/Recipes.js');
+        window.__knox.__recipes = RECIPE_BY_ID;
+
+        const results = [];
+        for (let k = 0; k < 4; k++) {
+          results.push(run('plank-wall', cx + k, cz, Math.PI));
+        }
+        results.push(run('place-crate', cx, cz + 2, 0));
+        results.push(run('place-bed', cx + 2, cz + 2, 0));
+        w.flushDirty(Infinity);
+
+        // Something to break it.
+        const h = hs.horde;
+        let brought = 0;
+        for (let i = 0; i < h.count && brought < 6; i++) {
+          if (h.state[i] === 4) continue;
+          h.x[i] = cx + 0.5 + (brought % 4);
+          h.z[i] = cz + 1.5 + Math.floor(brought / 4);
+          h.level[i] = 0;
+          h.state[i] = 3;
+          h.attention[i] = 1;
+          h.cooldown[i] = 30;
+          brought++;
+        }
+        // Chew the wall a little, so it reads as under attack.
+        for (let n = 0; n < 8; n++) g.damageBarricade(cx + 1, cz, cx + 1, cz + 1, 0, 9);
+        w.flushDirty(Infinity);
+
+        av.position.set(cx + 1.5, 0, cz - 0.5);
+        av.setYaw(Math.PI);
+        cam.snapTo(av.position);
+        return { built: results.filter((r) => r === null).length, failed: results.filter(Boolean) };
       }
 
       if (s.camp) {

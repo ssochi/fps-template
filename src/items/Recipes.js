@@ -30,6 +30,10 @@ export const OUTPUT = {
    * to carry" into "change this place". Everything M18 adds is one of these.
    */
   PLACE: 'place',
+  /** Undo: take down whatever you are facing and get some of it back. */
+  DISMANTLE: 'dismantle',
+  /** Make a damaged barricade whole again. */
+  REPAIR: 'repair',
 };
 
 /**
@@ -41,6 +45,8 @@ export const OUTPUT = {
  * @property {string} [itemId]  for OUTPUT.ITEM
  * @property {number} [objectId] for OUTPUT.PLACE
  * @property {boolean} [needsFire] refused unless a lit fire is within reach
+ * @property {boolean} [openEdge] barricades a gap rather than an opening
+ * @property {number} [planks] planks nailed up per job, for OUTPUT.BARRICADE
  * @property {number} [count]
  * @property {number} [seconds] how long it takes, in real seconds
  * @property {number} [noise]   loudness while working
@@ -109,6 +115,49 @@ export const RECIPES = [
 
 RECIPES.push(
   {
+    /**
+     * A wall built from planks.
+     *
+     * Deliberately the *barricade* mechanism applied to an open edge rather
+     * than a new wall material. Everything a built wall needs already exists
+     * for barricades: it blocks movement, it blocks sight, the mesher draws it,
+     * the horde breaks it, and it saves. A new `WALL.PLANK` would have needed
+     * all five written again, and would have shipped as indestructible — which
+     * is the M6 mistake, a base as an off switch.
+     */
+    id: 'plank-wall',
+    name: 'Board up an opening',
+    materials: { plank: 3, nails: 1 },
+    output: OUTPUT.BARRICADE,
+    openEdge: true,
+    // Three planks in, three planks of wall out. The barricade recipe adds one
+    // per job because boarding a window is meant to be a decision you repeat;
+    // a wall you are building from nothing is one job, and charging three
+    // planks for one plank of wall would be a quiet swindle.
+    planks: 3,
+    seconds: 11,
+    noise: 18,
+    description: 'A wall of planks across a gap. Weaker than brick, and yours.',
+  },
+  {
+    id: 'repair-barricade',
+    name: 'Repair a barricade',
+    materials: { nails: 1 },
+    output: OUTPUT.REPAIR,
+    seconds: 5,
+    noise: 12,
+    description: 'Makes a damaged barricade whole. Cheaper than rebuilding it.',
+  },
+  {
+    id: 'dismantle',
+    name: 'Take it down',
+    materials: { hammer: 0 },
+    output: OUTPUT.DISMANTLE,
+    seconds: 6,
+    noise: 9,
+    description: 'Pull down what is in front of you and keep most of the wood.',
+  },
+  {
     id: 'cook-meat',
     name: 'Cook meat',
     materials: { rawmeat: 1 },
@@ -164,6 +213,36 @@ RECIPES.push(
     seconds: 5,
     noise: 4,
     description: 'Warmth, light and the only way to cook. Feed it planks.',
+  },
+  {
+    id: 'place-crate',
+    name: 'Build a crate',
+    materials: { plank: 3, nails: 1 },
+    output: OUTPUT.PLACE,
+    objectId: OBJ.CRATE,
+    seconds: 8,
+    noise: 13,
+    description: 'Somewhere to put things down. A base with no storage is a rucksack.',
+  },
+  {
+    id: 'place-table',
+    name: 'Build a table',
+    materials: { plank: 2, nails: 1 },
+    output: OUTPUT.PLACE,
+    objectId: OBJ.TABLE,
+    seconds: 6,
+    noise: 11,
+    description: 'Blocks a doorway badly and holds a lamp well.',
+  },
+  {
+    id: 'place-bed',
+    name: 'Build a bunk',
+    materials: { plank: 4, sheet: 1 },
+    output: OUTPUT.PLACE,
+    objectId: OBJ.BED,
+    seconds: 10,
+    noise: 12,
+    description: 'Somewhere to sleep that is not the floor of a stranger.',
   },
   {
     id: 'place-generator',

@@ -226,6 +226,17 @@ const TABLES = {
     'recipe.rain-barrel': '搭一个接雨桶',
     'recipe.campfire': '生一堆篝火',
     'recipe.place-generator': '放下发电机',
+    'recipe.plank-wall': '用木板封住缺口',
+    'recipe.repair-barricade': '修补路障',
+    'recipe.dismantle': '拆掉',
+    'recipe.place-crate': '打一个木箱',
+    'recipe.place-table': '打一张桌子',
+    'recipe.place-bed': '搭一张床',
+    'craft.faceOpening': '要面对一个门洞或窗口',
+    'craft.faceGap': '要面对两块地板之间的空缺',
+    'craft.faceSomething': '要面对能拆的东西',
+    'craft.nothingBroken': '这里没有需要修的东西',
+    'craft.noRoom': '前面放不下',
 
     // --- M18: weather and what you build against it -------------------
     'object.rain barrel': '接雨桶', 'object.campfire': '篝火', 'object.generator': '发电机',

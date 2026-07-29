@@ -102,6 +102,15 @@ export class LootSystem {
     this.roomPurposes = roomPurposes;
     /** @type {Map<number, Container>} cell index → contents, once opened */
     this.opened = new Map();
+    /**
+     * Cells where the *player* put the container down.
+     *
+     * Loot is a function of `(seed, cell)`, which is exactly right for a
+     * cupboard that has been standing in a kitchen since before the outbreak
+     * and exactly wrong for a crate you carried in and set down five seconds
+     * ago. A shelf you built is empty because you have not put anything in it.
+     */
+    this.placed = new Set();
     this.stats = { generated: 0, items: 0 };
   }
 
@@ -124,7 +133,9 @@ export class LootSystem {
 
     let container = this.opened.get(found.index);
     if (!container) {
-      container = this._generate(found.index, found.objectId, this.grid.room[found.index]);
+      container = this.placed.has(found.index)
+        ? new Container(CAPACITY[found.objectId] ?? 12, OBJECT_SPEC[found.objectId]?.name ?? 'container')
+        : this._generate(found.index, found.objectId, this.grid.room[found.index]);
       this.opened.set(found.index, container);
       this.stats.generated++;
       this.stats.items += container.items.length;
@@ -165,6 +176,12 @@ export class LootSystem {
       container.add(item);
     }
     return container;
+  }
+
+  /** Note that a container at this cell was put there by the player. */
+  markPlaced(x, z, level) {
+    const i = this.grid.index(x, z, level);
+    if (i >= 0) this.placed.add(i);
   }
 
   /** Mark a container as searched, so the UI can grey it out. */
