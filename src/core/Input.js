@@ -26,6 +26,9 @@ export const ACTION = {
   PAUSE: 'pause',
   ATTACK: 'attack',
   SHOVE: 'shove',
+  INVENTORY: 'inventory',
+  CONSUME: 'consume',
+  EQUIP: 'equip',
 };
 
 const DEFAULT_BINDINGS = {
@@ -47,6 +50,11 @@ const DEFAULT_BINDINGS = {
   BracketLeft: ACTION.LEVEL_DOWN,
   BracketRight: ACTION.LEVEL_UP,
   Space: ACTION.PAUSE,
+  Tab: ACTION.INVENTORY,
+  KeyI: ACTION.INVENTORY,
+  Escape: ACTION.INVENTORY,
+  KeyF: ACTION.CONSUME,
+  KeyG: ACTION.EQUIP,
 };
 
 export class Input {

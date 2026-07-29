@@ -18,6 +18,9 @@ import { Combat } from './sim/Combat.js';
 import { Clock } from './core/Clock.js';
 import { Moodles } from './sim/Moodles.js';
 import { Hud } from './ui/Hud.js';
+import { Panels } from './ui/Panels.js';
+import { LootSystem } from './items/Loot.js';
+import { Item } from './items/ItemDb.js';
 import { events } from './core/Events.js';
 import { STOREY, tileToWorld } from './core/constants.js';
 
@@ -52,6 +55,29 @@ const clock = new Clock({ hour: 9 });
 const moodles = new Moodles(avatar.body);
 avatar.moodles = moodles;
 const hud = new Hud();
+
+// --- looting ------------------------------------------------------------
+// Loot keys off the purpose M2's furnishing pass gave each room, so a fridge in
+// a kitchen holds food and a wardrobe in a bedroom holds sheets.
+const roomPurposes = new Map(town.rooms.map((r) => [r.id, r.purpose]));
+const loot = new LootSystem(world.grid, 'knox-county', roomPurposes);
+const panels = new Panels(avatar.inventory);
+
+// Something to start with, so the first minute is not spent hungry and unarmed.
+avatar.inventory.add(new Item('water'));
+avatar.inventory.add(new Item('beans'));
+avatar.inventory.add(new Item('bandage', 2));
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (!panels.open) return;
+  e.stopPropagation();
+});
+panels.el.addEventListener('pointerdown', (e) => {
+  const move = panels.resolveClick(e.target);
+  if (!move) return;
+  move.from.transferTo(move.to, move.item, move.item.count);
+  panels.invalidate();
+});
 
 // The death report needs facts the Body does not have: how long you lasted and
 // how many you took with you. Assembling them here keeps Body ignorant of the UI.
@@ -112,7 +138,28 @@ const loop = new Loop({
     if (input.wasPressed(ACTION.ROTATE_CCW)) isoCamera.rotate(-1);
     if (input.wheelSteps) isoCamera.zoom(input.wheelSteps);
 
-    if (!paused) {
+    // --- inventory and looting -------------------------------------------
+    if (input.wasPressed(ACTION.INVENTORY)) {
+      panels.toggle(panels.open ? null : nearbyContainer());
+    }
+    if (panels.open) {
+      if (input.wasPressed(ACTION.CONSUME)) {
+        const food = panels.firstEdible();
+        if (food) {
+          avatar.consume(food);
+          panels.invalidate();
+        }
+      }
+      if (input.wasPressed(ACTION.EQUIP)) {
+        const weapon = panels.firstWeapon();
+        if (weapon) {
+          avatar.equip(weapon);
+          panels.invalidate();
+        }
+      }
+    }
+
+    if (!paused && !panels.open) {
       updateAim();
 
       // Screen-relative movement: "up" is up the screen at any camera rotation.
@@ -160,6 +207,11 @@ const loop = new Loop({
     // hunger and infection are measured in days, so Body and Moodles are handed
     // both rather than each inventing a scale.
     const gameDt = clock.advance(dt);
+    const hoursSince = gameDt / 3600;
+    // Everything perishable ages on the in-game clock: what you carry, and what
+    // is still sitting in the containers you have already opened.
+    avatar.inventory.age(hoursSince);
+    loot.age(hoursSince);
     avatar.body.update(dt, gameDt);
     moodles.update(dt, gameDt, {
       indoors: world.grid.hasFlag(observer.x, observer.z, observer.level, FLAG.INDOOR),
@@ -187,6 +239,7 @@ const loop = new Loop({
 
     if (loop.frame % 12 === 0) {
       const r = renderer.info;
+      panels.render();
       hud.update({
         clock,
         player: avatar,
@@ -194,7 +247,9 @@ const loop = new Loop({
         debug:
           `${loop.fps.toFixed(0)} fps · sim ${loop.lastUpdateMs.toFixed(2)}ms · ${r.calls} draws\n` +
           `${horde.horde.stats.alive} alive · ${horde.horde.stats.dead} down · ` +
-          `${horde.horde.stats.chasing} chasing · ${combat.stats.kills} killed`,
+          `${horde.horde.stats.chasing} chasing · ${combat.stats.kills} killed\n` +
+          `carrying ${avatar.inventory.weight.toFixed(1)}kg · ` +
+          `${loot.stats.generated} containers searched`,
       });
     }
   },
@@ -203,4 +258,20 @@ const loop = new Loop({
 loop.start();
 
 // Console handle, and the hook the smoke test drives.
-window.__knox = { world, town, renderer, isoCamera, loop, avatar, input, horde, combat, clock, moodles, hud };
+/** The container the player is standing next to, if any. */
+function nearbyContainer() {
+  const t = avatar.tile();
+  for (const [dx, dz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const found = loot.open(t.x + dx, t.z + dz, avatar.level);
+    if (found) {
+      loot.markSearched(t.x + dx, t.z + dz, avatar.level);
+      return found;
+    }
+  }
+  return null;
+}
+
+window.__knox = {
+  world, town, renderer, isoCamera, loop, avatar, input, horde, combat,
+  clock, moodles, hud, loot, panels,
+};

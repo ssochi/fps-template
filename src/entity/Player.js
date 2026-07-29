@@ -25,6 +25,14 @@ import { OBJ, objectId } from '../world/Objects.js';
 import { events } from '../core/Events.js';
 import { Body } from '../sim/Body.js';
 import { WeaponInstance } from '../items/Weapons.js';
+import { Inventory } from '../items/Container.js';
+import { Item } from '../items/ItemDb.js';
+
+/**
+ * Reverse map from a weapon definition back to the item that carries it, so an
+ * unequipped weapon goes back in the bag rather than being destroyed.
+ */
+const ITEM_FOR_WEAPON = { knife: 'knife', bat: 'bat', axe: 'axe', crowbar: 'crowbar' };
 
 const SPEED = {
   sneak: 1.15,
@@ -62,8 +70,12 @@ export class Player extends Entity {
 
     /** Body-part health, bleeding and infection. */
     this.body = new Body();
-    /** What is in your hands. M8 makes this swappable from an inventory. */
+    /** What is in your hands. */
     this.weapon = new WeaponInstance('crowbar');
+    /** What you are carrying. Weight, not slots — see items/Container.js. */
+    this.inventory = new Inventory(10);
+    /** Set by main once Moodles exists; injuries and moodles both slow you. */
+    this.moodles = null;
 
     /** 0–1. Depletes when sprinting, recovers slowly. */
     this.endurance = 1;
@@ -139,9 +151,11 @@ export class Player extends Entity {
     let mode = intent.sneak ? 'sneak' : intent.run ? 'run' : 'walk';
     if (mode === 'run' && (this.winded || this.endurance <= 0)) mode = 'walk';
 
-    // A wounded or broken leg is the injury the player feels most, because it
-    // decides whether running away is still an option.
-    let speed = SPEED[mode] * this.body.mobility;
+    // Three separate things slow you down, and they multiply: a wounded leg,
+    // the moodles (pain and cold), and how much you decided to carry. All three
+    // are consequences of choices the player made, which is the point.
+    let speed = SPEED[mode] * this.body.mobility * this.inventory.mobility;
+    if (this.moodles) speed *= this.moodles.mobility;
 
     // Backpedalling: scale by how much the move direction opposes the facing.
     const forward = this.forward(this._delta);
@@ -277,6 +291,65 @@ export class Player extends Entity {
   _animate(dt) {
     this.character.update(dt, this.currentSpeed, this.gait);
     this.character.look(0);
+  }
+
+  /**
+   * Eat or drink something.
+   * @param {import('../items/ItemDb.js').Item} item
+   * @returns {boolean} whether it was consumed
+   */
+  consume(item) {
+    if (!this.moodles || item.spoiled) return false;
+    if (item.nutrition <= 0 && item.hydration <= 0) return false;
+
+    this.moodles.eat(item.nutrition);
+    this.moodles.drink(item.hydration);
+    this.inventory.remove(item, 1);
+    events.emit('player:ate', { id: item.id, nutrition: item.nutrition });
+    return true;
+  }
+
+  /**
+   * Swap what is in your hands for something in your bag.
+   * The old weapon goes back into the bag rather than vanishing — losing an axe
+   * because you picked up a knife would be a bad surprise.
+   */
+  equip(item) {
+    if (!item.def.weaponId) return false;
+    const previous = this.weapon;
+    this.weapon = new WeaponInstance(item.def.weaponId);
+    this.inventory.remove(item, 1);
+    if (previous && previous.def.id !== 'fists') {
+      const back = ITEM_FOR_WEAPON[previous.def.id];
+      if (back) this.inventory.add(new Item(back));
+    }
+    events.emit('player:equipped', { id: item.def.weaponId });
+    return true;
+  }
+
+  /** Apply a bandage or first aid kit to whatever is worst. */
+  useMedical(item) {
+    const def = item.def;
+    if (!def.stopsBleeding && !def.heal) return false;
+
+    // Treat the part that is actually in trouble, not a menu selection: the
+    // player already knows which limb hurts, and making them say so is friction.
+    let worst = 0;
+    let worstScore = -Infinity;
+    for (let i = 0; i < 6; i++) {
+      const score = this.body.bleed[i] * 100 + (100 - this.body.health[i]);
+      if (score > worstScore) {
+        worstScore = score;
+        worst = i;
+      }
+    }
+    // A fraction, not a subtraction: a dressing works the same way on a
+    // scratch and on a deep wound. Only a full kit stops a bleed outright.
+    if (def.stopsBleeding) this.body.bleed[worst] *= 1 - def.stopsBleeding;
+    if (def.heal) this.body.health[worst] = Math.min(100, this.body.health[worst] + def.heal);
+    this.inventory.remove(item, 1);
+    events.emit('player:treated', { part: worst, id: item.id });
+    return true;
   }
 
   /** Metres per second the player would move right now, for the HUD. */

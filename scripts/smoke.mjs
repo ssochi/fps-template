@@ -45,7 +45,9 @@ const SHOTS = [
   // Night, and the death report. Both are states the game spends real time in
   // and neither was previously captured by anything.
   { name: '11-night', rotation: 0, zoom: 3, hour: 1 },
-  { name: '12-death', rotation: 0, zoom: 2, death: true },
+  // Looting: the panels open over a container with something in it.
+  { name: '12-looting', rotation: 0, zoom: 1, loot: true },
+  { name: '13-death', rotation: 0, zoom: 2, death: true },
 ];
 
 const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
@@ -139,6 +141,39 @@ try {
       // The player really does die during the combat shot, and the death card
       // is modal — without clearing it, every later shot is a screenshot of it.
       window.__knox.hud.el['hud-death'].classList.toggle('hidden', !s.death);
+
+      // Panels are modal; leaving them open would cover every later shot.
+      if (!s.loot) window.__knox.panels.close();
+
+      if (s.loot) {
+        const { avatar: av, loot: lootSys, panels: p, world: w, town: t } = window.__knox;
+        // Find a container the town actually generated, and stand at it.
+        let found = null;
+        outer: for (const b of t.buildings) {
+          for (let z = b.rect.z; z < b.rect.z + b.rect.d; z++) {
+            for (let x = b.rect.x; x < b.rect.x + b.rect.w; x++) {
+              const c = lootSys.open(x, z, 0);
+              if (c && !c.isEmpty) {
+                found = { x, z, container: c };
+                break outer;
+              }
+            }
+          }
+        }
+        if (found) {
+          av.level = 0;
+          av.position.set(found.x + 0.5, 0, found.z + 1.5);
+          av.syncLevelHeight();
+          isoCamera.snapTo(av.position);
+          p.open = true;
+          p.container = found.container;
+          p.el.classList.remove('hidden');
+          p.invalidate();
+          p.render();
+          return { container: found.container.name, items: found.container.items.length };
+        }
+        return { container: 'none found', items: 0 };
+      }
 
       if (s.hour !== undefined) {
         window.__knox.clock.elapsed =

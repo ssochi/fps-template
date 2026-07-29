@@ -12,8 +12,8 @@ Cycle 1 (M0 – M10). An Exploration milestone opens each cycle.
 | M5 | The horde | ✅ Complete | 6 | 142 tests; 260 zombies in 2 draw calls, AI 0.22 ms/400 |
 | M6 | Combat & injury | ✅ Complete | 5 | 176 tests; located damage, infection, corpses |
 | M7 | Survival simulation | ✅ Complete | 6 | 204 tests; clock, 7 moodles, HUD, death report |
-| M8 | Inventory & looting | 🟡 Next | – | |
-| M9 | Crafting & base building | ⬜ Not started | – | |
+| M8 | Inventory & looting | ✅ Complete | 4 | 240 tests; weight-based, room-keyed lazy loot |
+| M9 | Crafting & base building | 🟡 Next | – | |
 | M10 | Progression & polish | ⬜ Not started | – | |
 
 Cycle 2 opens at M11 with a fresh Exploration milestone.
