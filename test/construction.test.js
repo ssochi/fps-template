@@ -174,7 +174,7 @@ describe('siege', () => {
     g.setWall(12, 10, 0, DIR.W, WALL.DOORWAY);
     g.addPlank(12, 10, 0, DIR.W, BARRICADE.hpPerPlank, BARRICADE.maxPlanks);
 
-    const flow = new FlowField(g, 0);
+    const flow = new FlowField(g);
     const sound = new SoundField(g, 0);
     const horde = new Horde(g, flow, sound, { capacity: 16, seed: 'siege' });
     const siege = new Siege(g, horde);
@@ -236,7 +236,7 @@ describe('siege', () => {
     for (let z = 0; z < 24; z++) g.setWall(12, z, 0, DIR.W, WALL.BRICK);
     g.setWall(12, 10, 0, DIR.W, WALL.DOORWAY);
     g.setObject(12, 10, 0, packObject(OBJ.DOOR, DIR.W));
-    const flow = new FlowField(g, 0);
+    const flow = new FlowField(g);
     const horde = new Horde(g, flow, new SoundField(g, 0), { capacity: 8, seed: 'door' });
     const siege = new Siege(g, horde);
     flow.build([{ x: 16, z: 10 }]);

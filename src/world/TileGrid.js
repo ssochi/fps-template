@@ -23,6 +23,7 @@
  * about its north edge. `wallAt()` does this for you.
  */
 import { CHUNK, DIR, DIR_VEC } from '../core/constants.js';
+import { OBJ, objectId } from './Objects.js';
 
 /**
  * Per-cell object state, bitwise. Separate from `flags` because flags describe
@@ -245,6 +246,39 @@ export class TileGrid {
     const to = this.idx(x2, z2, level);
     if (this.floor[to] === FLOOR.VOID || this.flags[to] & FLAG.SOLID) return false;
     return CLIMBABLE_WALLS.has(this.wallBetween(x1, z1, x2, z2, level));
+  }
+
+  // --- vertical links ---------------------------------------------------
+  //
+  // A staircase is two tiles on one storey — a bottom step and a top step —
+  // with the ceiling above the *bottom* step opened out and the cell above the
+  // *top* step left solid as a landing. So the join between the storeys is the
+  // single tile column above the top step: standing on the top step you climb,
+  // standing on the landing you descend. One column, both directions, one rule.
+  //
+  // Before M13 there were two rules and they disagreed. Ascent used the top
+  // step; descent used the opened ceiling above the bottom step — a cell that
+  // `canWalk` correctly refuses to enter, because it has no floor. Going
+  // upstairs was a one-way trip, and the test that covered it placed the player
+  // on the void tile by hand and said so in a comment. Pathing, sound and the
+  // player all read the two methods below now, so there is one answer.
+
+  /** @returns {number} the level a climb from here reaches, or -1 */
+  climbFrom(x, z, level) {
+    const i = this.index(x, z, level);
+    if (i < 0 || level + 1 >= this.levels) return -1;
+    if (objectId(this.object[i]) !== OBJ.STAIRS_HIGH) return -1;
+    return this.isWalkable(x, z, level + 1) ? level + 1 : -1;
+  }
+
+  /** @returns {number} the level a descent from here reaches, or -1 */
+  descendFrom(x, z, level) {
+    if (level <= 0) return -1;
+    const below = this.index(x, z, level - 1);
+    if (below < 0) return -1;
+    if (objectId(this.object[below]) !== OBJ.STAIRS_HIGH) return -1;
+    // You must be standing somewhere, and arriving somewhere.
+    return this.isWalkable(x, z, level) && this.isWalkable(x, z, level - 1) ? level - 1 : -1;
   }
 
   /** Does the edge between two adjacent cells block line of sight? */

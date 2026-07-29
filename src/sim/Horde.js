@@ -27,6 +27,7 @@
 import { DIR_VEC, STOREY, tileToWorld } from '../core/constants.js';
 import { hasLineOfSight } from './Sight.js';
 import { Rng } from '../core/Rng.js';
+import { DOWN, UP } from './FlowField.js';
 
 export const STATE = {
   IDLE: 0,
@@ -58,6 +59,9 @@ export const OVERKILL = 95;
 const SIGHT_RANGE = 13;
 const SIGHT_COS = Math.cos(Math.PI * 0.42); // ~150° total, they are not subtle
 
+/** How long a flight of stairs takes to climb, in seconds. */
+const CLIMB_TIME = 1.1;
+
 /** Attention decays this fast; chase refills it to 1. */
 const ATTENTION_DECAY = 0.14;
 /** Above this they chase, below it they investigate, at zero they lose interest. */
@@ -70,10 +74,15 @@ export class Horde {
    * @param {import('./Sound.js').SoundField} sound
    * @param {{ capacity?: number, seed?: string }} [opts]
    */
-  constructor(grid, flow, sound, { capacity = 512, seed = 'horde' } = {}) {
+  constructor(grid, flow, sound, { capacity = 512, seed = 'horde', migration = null } = {}) {
     this.grid = grid;
     this.flow = flow;
     this.sound = sound;
+    /**
+     * Optional. When present, wanderers drift toward emptier and noisier
+     * districts instead of walking at random — see `sim/Migration.js`.
+     */
+    this.migration = migration;
     this.capacity = capacity;
     this.rng = new Rng(seed);
 
@@ -93,6 +102,8 @@ export class Horde {
     /** Wander heading, held for a while so they do not jitter on the spot. */
     this._wanderDir = new Int8Array(capacity);
     this._wanderTimer = new Float32Array(capacity);
+    /** Seconds still to spend on the stairs before the storey actually changes. */
+    this._climbTimer = new Float32Array(capacity);
 
     this.health = new Float32Array(capacity);
     /** Seconds left of a stagger, an attack windup, or getting back up. */
@@ -140,6 +151,7 @@ export class Horde {
     this.phase[i] = this.rng.next();
     this._wanderDir[i] = this.rng.int(0, 3);
     this._wanderTimer[i] = this.rng.range(0, 4);
+    this._climbTimer[i] = CLIMB_TIME;
 
     // Muted, slightly varied — the dead should read as a mass, not as a set of
     // individuals, so the spread is deliberately narrow.
@@ -234,7 +246,7 @@ export class Horde {
         this.attention[i] = Math.max(0, this.attention[i] - ATTENTION_DECAY * dt);
       }
 
-      const heard = this.sound.at(tx, tz);
+      const heard = this.sound.at(tx, tz, this.level[i]);
 
       // --- state ------------------------------------------------------
       let state;
@@ -247,20 +259,30 @@ export class Horde {
       else if (state === STATE.INVESTIGATE) investigating++;
 
       // --- movement ---------------------------------------------------
+      const level = this.level[i];
       let dir = -1;
       if (state === STATE.CHASE) {
         // The flow field is built from the player, so following it *is*
         // pursuit — without this file ever reading a heading from the player.
-        dir = this.flow.directionAt(tx, tz);
-        if (dir < 0) dir = this.sound.loudestDirection(tx, tz);
+        // Outside the field's radius there is simply no direction, and hearing
+        // takes over; that fallback is what makes bounding the sweep safe.
+        dir = this.flow.directionAt(tx, tz, level);
+        if (dir < 0) dir = this.sound.loudestDirection(tx, tz, level);
       } else if (state === STATE.INVESTIGATE) {
-        dir = this.sound.loudestDirection(tx, tz);
-        if (dir < 0) dir = this.flow.directionAt(tx, tz);
+        dir = this.sound.loudestDirection(tx, tz, level);
+        if (dir < 0) dir = this.flow.directionAt(tx, tz, level);
       } else {
         this._wanderTimer[i] -= dt;
         if (this._wanderTimer[i] <= 0) {
           this._wanderTimer[i] = this.rng.range(2.5, 7);
-          this._wanderDir[i] = this.rng.int(0, 3);
+          // Re-rolling is where migration enters: a drift heading is chosen in
+          // preference to a random one, but only when the districts around
+          // actually differ. Applying it every tick instead would make the
+          // whole horde turn in lockstep the moment a census landed.
+          const drift = this.migration && level === 0
+            ? this.migration.driftDirection(tx, tz)
+            : -1;
+          this._wanderDir[i] = drift >= 0 ? drift : this.rng.int(0, 3);
         }
         dir = this._wanderDir[i];
       }
@@ -361,12 +383,34 @@ export class Horde {
 
   /** Move toward the centre of the neighbouring tile in `dir`. */
   _step(i, dir, speed, dt) {
-    const v = DIR_VEC[dir];
     const tx = Math.floor(this.x[i]);
     const tz = Math.floor(this.z[i]);
+    const level = this.level[i];
+
+    // A vertical step is taken all at once rather than eased, because there is
+    // no half-way up a staircase to be at: the grid is storeys, not slopes. It
+    // costs the same beat a stagger does, so a body climbing stairs is visibly
+    // slower than one crossing a room, which is the whole reason `COST.stairs`
+    // is dearer than `COST.open`.
+    if (dir === UP || dir === DOWN) {
+      const to = dir === UP
+        ? this.grid.climbFrom(tx, tz, level)
+        : this.grid.descendFrom(tx, tz, level);
+      if (to < 0) return;
+      this._climbTimer[i] -= dt;
+      if (this._climbTimer[i] > 0) return;
+      this._climbTimer[i] = CLIMB_TIME;
+      this.level[i] = to;
+      // Land on the tile centre: arriving a hair off it can put the body on the
+      // wrong side of a wall that only exists on the storey it arrived at.
+      this.x[i] = tx + 0.5;
+      this.z[i] = tz + 0.5;
+      return;
+    }
+
+    const v = DIR_VEC[dir];
     const nx = tx + v.dx;
     const nz = tz + v.dz;
-    const level = this.level[i];
 
     if (!this.grid.canPass(tx, tz, nx, nz, level)) {
       // Blocked: turn to face the obstacle anyway, so a crowd piling against a

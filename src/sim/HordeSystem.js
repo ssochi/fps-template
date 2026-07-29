@@ -16,9 +16,10 @@ import { Mesh } from 'three';
 import { Character } from '../entity/Character.js';
 import { allocateInstances, bakeVat } from '../render/Vat.js';
 import { createCrowdMaterial } from '../render/CrowdMaterial.js';
-import { FlowField } from './FlowField.js';
+import { COST, FlowField } from './FlowField.js';
 import { SoundField } from './Sound.js';
 import { Horde } from './Horde.js';
+import { Migration } from './Migration.js';
 import { STOREY } from '../core/constants.js';
 import { events } from '../core/Events.js';
 
@@ -29,6 +30,21 @@ const CLIP_FRAMES = { shamble: 24, lunge: 18, idle: 16, attack: 14, fall: 18 };
 const REBUILD_DISTANCE = 3;
 /** …or this long, whichever comes first, so opened doors eventually register. */
 const REBUILD_INTERVAL = 1.5;
+
+/**
+ * How far the flow field reaches, in tiles of open ground.
+ *
+ * The sweep used to run until it hit the edge of the world. That is O(cells) per
+ * rebuild whatever the town's size, and M11's benchmark put a number on it: a
+ * 300 × 300 map visits 270,000 cells to steer zombies at most forty metres away.
+ *
+ * Fifty tiles is comfortably past the point where anything is still chasing —
+ * sight reaches thirteen and attention decays over about seven seconds of being
+ * unseen — and a zombie beyond it falls back to hearing, which is a path the
+ * horde has always taken when the field had no answer. So the bound costs
+ * nothing behaviourally and turns the sweep into O(radius²).
+ */
+export const FLOW_RADIUS = 50;
 
 /** The dead are grey-green and drained; the palette reserves colour for meaning. */
 const CORPSE_COLORS = {
@@ -121,9 +137,14 @@ export class HordeSystem {
     this.world = world;
     this.grid = world.grid;
 
-    this.flow = new FlowField(this.grid, 0);
-    this.sound = new SoundField(this.grid, 0);
-    this.horde = new Horde(this.grid, this.flow, this.sound, { capacity, seed });
+    this.flow = new FlowField(this.grid);
+    this.sound = new SoundField(this.grid);
+    this.migration = new Migration(this.grid);
+    this.horde = new Horde(this.grid, this.flow, this.sound, {
+      capacity,
+      seed,
+      migration: this.migration,
+    });
 
     this.vat = bakeVat(() => new Character(CORPSE_COLORS), ZOMBIE_CLIPS);
     this.instances = allocateInstances(this.vat.geometry, capacity);
@@ -146,12 +167,14 @@ export class HordeSystem {
 
     this.clock = 0;
     this._sinceRebuild = REBUILD_INTERVAL;
-    this._lastGoal = { x: -999, z: -999 };
+    this._lastGoal = { x: -999, z: -999, level: -1 };
 
     // Anything that makes a noise emits this; nothing needs to know the horde
     // exists in order to be heard by it.
     this._offNoise = events.on('noise:made', (e) => {
-      if (e.level === this.sound.level) this.sound.emit(e.x, e.z, e.loudness);
+      this.sound.emit(e.x, e.z, e.level ?? 0, e.loudness);
+      // The sound field forgets in seconds; the town remembers for minutes.
+      this.migration.remember(e.x, e.z, e.loudness);
     });
 
     this.stats = { instances: 0, rebuilds: 0 };
@@ -172,15 +195,22 @@ export class HordeSystem {
 
     this._sinceRebuild += dt;
     const moved =
-      Math.abs(playerTile.x - this._lastGoal.x) + Math.abs(playerTile.z - this._lastGoal.z);
+      Math.abs(playerTile.x - this._lastGoal.x) +
+      Math.abs(playerTile.z - this._lastGoal.z) +
+      (playerTile.level !== this._lastGoal.level ? REBUILD_DISTANCE : 0);
     if (moved >= REBUILD_DISTANCE || this._sinceRebuild >= REBUILD_INTERVAL) {
-      this.flow.build([{ x: playerTile.x, z: playerTile.z }]);
+      this.flow.build(
+        [{ x: playerTile.x, z: playerTile.z, level: playerTile.level }],
+        FLOW_RADIUS * COST.open,
+      );
       this._lastGoal.x = playerTile.x;
       this._lastGoal.z = playerTile.z;
+      this._lastGoal.level = playerTile.level;
       this._sinceRebuild = 0;
       this.stats.rebuilds++;
     }
 
+    this.migration.update(dt, this.horde);
     this.horde.update(dt, playerTile);
   }
 

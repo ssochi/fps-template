@@ -19,7 +19,7 @@ const always = (v) => () => v;
 
 function fight({ weapon = 'crowbar', roll = always(0.5) } = {}) {
   const g = room();
-  const flow = new FlowField(g, 0);
+  const flow = new FlowField(g);
   const sound = new SoundField(g, 0);
   const horde = new Horde(g, flow, sound, { capacity: 32, seed: 'fight' });
   const player = new Player(g);

@@ -59,6 +59,14 @@ const ENDURANCE = {
 const VAULT_TIME = 0.55;
 const DOOR_TIME = 0.3;
 
+/**
+ * How long after using a staircase before it will move you again.
+ *
+ * The two storeys join at one tile column, so without this you would climb and
+ * fall in alternate ticks. Long enough to step off the landing at a walk.
+ */
+const STAIR_COOLDOWN = 0.8;
+
 export class Player extends Entity {
   /**
    * @param {import('../world/TileGrid.js').TileGrid} grid
@@ -97,6 +105,9 @@ export class Player extends Entity {
     /** Where the cursor is, in world space. The body turns toward it. */
     this.aimTarget = new Vector3();
     this.hasAim = false;
+
+    /** Counts down after a storey change, so the staircase is not a lift shaft. */
+    this._stairCooldown = 0;
 
     /** Set while a vault or a door is in progress; blocks other input. */
     this.busy = 0;
@@ -192,7 +203,7 @@ export class Player extends Entity {
     this.gait = this.currentSpeed > 0 ? mode : 'idle';
     this._drainEndurance(dt, this.gait);
 
-    this._checkStairs();
+    this._checkStairs(dt);
   }
 
   _drainEndurance(dt, gait) {
@@ -217,31 +228,37 @@ export class Player extends Entity {
   // --- storeys ----------------------------------------------------------
 
   /**
-   * Stairs move you a storey when you reach the top or bottom of a flight.
-   * Detected from the tile you are standing on rather than from a trigger
-   * volume, because the grid already knows and a second source of truth about
-   * where the stairs are is a source of disagreement.
+   * Stairs move you a storey when you walk onto the join between two.
+   *
+   * Both directions go through `TileGrid.climbFrom`/`descendFrom`, which is the
+   * same rule the flow field and the sound field use. Before M13 this file had
+   * its own: ascent used the top step, descent used the opened ceiling above the
+   * *bottom* step — a cell with no floor, which `canWalk` correctly refuses to
+   * enter. So going upstairs was a one-way trip, and the test that covered it
+   * put the player on the void tile by hand and said so in a comment.
+   *
+   * The join is one tile column, so a naive check would flip you up and down
+   * again every tick. The cooldown is what makes it a staircase rather than a
+   * lift shaft: having just used it, you get to stand on it.
    */
-  _checkStairs() {
+  _checkStairs(dt) {
+    if (this._stairCooldown > 0) {
+      this._stairCooldown -= dt;
+      return;
+    }
     worldToTile(this.position.x, this.position.z, this._tile);
     const { x, z } = this._tile;
-    const i = this.grid.index(x, z, this.level);
-    if (i < 0) return;
 
-    const id = objectId(this.grid.object[i]);
-    if (id === OBJ.STAIRS_HIGH && this.level + 1 < this.grid.levels) {
-      // Step off the top of the flight onto the landing above.
-      if (this.grid.isWalkable(x, z, this.level + 1)) {
-        this.level++;
-        this.syncLevelHeight();
-        events.emit('player:levelChanged', { level: this.level });
-      }
-    } else if (this.grid.getFloor(x, z, this.level) === 0 && this.level > 0) {
-      // Standing over a stairwell opening: drop to the flight below.
-      this.level--;
-      this.syncLevelHeight();
-      events.emit('player:levelChanged', { level: this.level });
-    }
+    // Down first. Standing on a landing you are also standing on the top of the
+    // flight below, and going down is the direction that was broken.
+    let to = this.grid.descendFrom(x, z, this.level);
+    if (to < 0) to = this.grid.climbFrom(x, z, this.level);
+    if (to < 0 || to === this.level) return;
+
+    this.level = to;
+    this._stairCooldown = STAIR_COOLDOWN;
+    this.syncLevelHeight();
+    events.emit('player:levelChanged', { level: this.level });
   }
 
   // --- interaction ------------------------------------------------------

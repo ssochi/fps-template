@@ -33,7 +33,7 @@ function follow(flow, x, z, limit = 400) {
 describe('flow field', () => {
   it('leads every reachable tile to the goal', () => {
     const g = room();
-    const flow = new FlowField(g, 0);
+    const flow = new FlowField(g);
     flow.build([{ x: 10, z: 10 }]);
 
     for (const [x, z] of [[0, 0], [20, 20], [0, 20], [5, 13]]) {
@@ -43,7 +43,7 @@ describe('flow field', () => {
 
   it('costs nothing at the goal itself', () => {
     const g = room();
-    const flow = new FlowField(g, 0);
+    const flow = new FlowField(g);
     flow.build([{ x: 10, z: 10 }]);
     expect(flow.costAt(10, 10)).toBe(0);
     expect(flow.directionAt(10, 10)).toBe(-1);
@@ -60,7 +60,7 @@ describe('flow field', () => {
       g.setWall(2, z, 0, DIR.W, WALL.BRICK);
       g.setWall(4, z, 0, DIR.E, WALL.BRICK);
     }
-    const flow = new FlowField(g, 0);
+    const flow = new FlowField(g);
     flow.build([{ x: 15, z: 15 }]);
     expect(flow.costAt(3, 3)).toBe(UNREACHABLE);
     expect(flow.reachable(3, 3)).toBe(false);
@@ -74,7 +74,7 @@ describe('flow field', () => {
     g.setWall(10, 5, 0, DIR.W, WALL.DOORWAY);
     g.setObject(10, 5, 0, packObject(OBJ.DOOR, DIR.W));
 
-    const flow = new FlowField(g, 0);
+    const flow = new FlowField(g);
     flow.build([{ x: 15, z: 5 }]);
 
     // Getting there through the shut door costs more than going round the end
@@ -89,7 +89,7 @@ describe('flow field', () => {
   it('treats a climbable fence as expensive but passable', () => {
     const g = room();
     for (let z = 0; z < 21; z++) g.setWall(10, z, 0, DIR.W, WALL.FENCE);
-    const flow = new FlowField(g, 0);
+    const flow = new FlowField(g);
     flow.build([{ x: 15, z: 10 }]);
     expect(flow.reachable(5, 10)).toBe(true);
     expect(flow.costAt(9, 10)).toBeGreaterThanOrEqual(COST.climb);
@@ -97,7 +97,7 @@ describe('flow field', () => {
 
   it('supports several goals at once', () => {
     const g = room();
-    const flow = new FlowField(g, 0);
+    const flow = new FlowField(g);
     flow.build([{ x: 2, z: 2 }, { x: 18, z: 18 }]);
     expect(flow.costAt(2, 2)).toBe(0);
     expect(flow.costAt(18, 18)).toBe(0);
@@ -116,7 +116,7 @@ describe('flow field', () => {
     g.setWall(4, 12, 0, DIR.N, WALL.FENCE);
     g.setFlag(9, 9, 0, FLAG.SOLID, true);
 
-    const flow = new FlowField(g, 0);
+    const flow = new FlowField(g);
     // Re-derive each edge cost from the field: a tile's cost must equal its
     // parent's cost plus the reference step cost of the edge between them.
     flow.build([{ x: 12, z: 12 }]);
@@ -139,7 +139,7 @@ describe('flow field', () => {
   it('never routes through a solid wall', () => {
     const g = room();
     for (let z = 0; z < 21; z++) g.setWall(10, z, 0, DIR.W, WALL.BRICK);
-    const flow = new FlowField(g, 0);
+    const flow = new FlowField(g);
     flow.build([{ x: 15, z: 10 }]);
     // The whole west half is sealed off.
     expect(flow.reachable(5, 10)).toBe(false);
@@ -149,22 +149,22 @@ describe('flow field', () => {
 describe('sound', () => {
   it('is loudest at its source and falls off with distance', () => {
     const g = room(41, 41);
-    const sound = new SoundField(g, 0);
-    sound.emit(20, 20, 20);
+    const sound = new SoundField(g);
+    sound.emit(20, 20, 0, 20);
     expect(sound.at(20, 20)).toBe(20);
     expect(sound.at(25, 20)).toBeLessThan(sound.at(22, 20));
     expect(sound.at(22, 20)).toBeLessThan(sound.at(20, 20));
   });
 
   it('is muffled far more by a wall than by open air', () => {
-    const open = new SoundField(room(41, 41), 0);
-    open.emit(20, 20, 30);
+    const open = new SoundField(room(41, 41));
+    open.emit(20, 20, 0, 30);
     const throughAir = open.at(24, 20);
 
     const g = room(41, 41);
     for (let z = 0; z < 41; z++) g.setWall(22, z, 0, DIR.W, WALL.BRICK);
-    const walled = new SoundField(g, 0);
-    walled.emit(20, 20, 30);
+    const walled = new SoundField(g);
+    walled.emit(20, 20, 0, 30);
     expect(walled.at(24, 20)).toBeLessThan(throughAir);
   });
 
@@ -175,8 +175,8 @@ describe('sound', () => {
       g.setWall(22, 20, 0, DIR.W, WALL.DOORWAY);
       g.setObject(22, 20, 0, packObject(OBJ.DOOR, DIR.W));
       if (open) g.setDoorOpen(22, 20, 0, true);
-      const s = new SoundField(g, 0);
-      s.emit(20, 20, 30);
+      const s = new SoundField(g);
+      s.emit(20, 20, 0, 30);
       return s.at(24, 20);
     };
     expect(make(true)).toBeGreaterThan(make(false));
@@ -184,23 +184,23 @@ describe('sound', () => {
 
   it('decays to silence', () => {
     const g = room();
-    const sound = new SoundField(g, 0);
-    sound.emit(10, 10, 10);
+    const sound = new SoundField(g);
+    sound.emit(10, 10, 0, 10);
     for (let i = 0; i < 200; i++) sound.update(1 / 30);
     expect(sound.at(10, 10)).toBe(0);
   });
 
   it('points uphill toward the source', () => {
     const g = room(41, 41);
-    const sound = new SoundField(g, 0);
-    sound.emit(30, 20, 30);
+    const sound = new SoundField(g);
+    sound.emit(30, 20, 0, 30);
     // Standing west of the noise, the loudest neighbour is the one to the east.
     expect(sound.loudestDirection(20, 20)).toBe(DIR.E);
   });
 
   it('reports no direction when it is quiet', () => {
     const g = room();
-    const sound = new SoundField(g, 0);
+    const sound = new SoundField(g);
     expect(sound.loudestDirection(10, 10)).toBe(-1);
   });
 });
@@ -208,8 +208,8 @@ describe('sound', () => {
 describe('horde behaviour', () => {
   function setup() {
     const g = room(41, 41);
-    const flow = new FlowField(g, 0);
-    const sound = new SoundField(g, 0);
+    const flow = new FlowField(g);
+    const sound = new SoundField(g);
     const horde = new Horde(g, flow, sound, { capacity: 64, seed: 'test' });
     return { g, flow, sound, horde };
   }
@@ -254,7 +254,7 @@ describe('horde behaviour', () => {
     const { horde, sound, flow } = setup();
     const i = horde.spawn(20, 20, 0);
     horde.yaw[i] = Math.atan2(1, 0); // facing away; this is hearing, not sight
-    sound.emit(26, 20, 25);
+    sound.emit(26, 20, 0, 25);
     flow.build([{ x: 26, z: 20 }]);
     horde.update(1 / 30, { x: 26, z: 20, level: 0 });
     expect(horde.state[i]).toBe(STATE.INVESTIGATE);

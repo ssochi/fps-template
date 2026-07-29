@@ -33,8 +33,8 @@ reasoning in [`blueprint.md` §8](./blueprint.md).
 | --- | --- | --- | --- | --- |
 | M11 | Exploration (opens cycle 2) | ✅ Complete | 1 | Blueprint **v2** published; flow-field scaling wall identified; dead `Walker` class removed |
 | M12 | Character creation & the main menu | ✅ Complete | 5 | 326 tests; 25 traits / 9 occupations, autosave, `main.js` 411 → 52 lines |
-| M13 | The horde that moves | 🟡 Next | — | Two-field pathing (fine radius + coarse map), stair edges, migration. The architectural item |
-| M14 | Metagame events & the shutoff clock | ⬜ Planned | — | The helicopter; water and power failing on a schedule |
+| M13 | The horde that moves | ✅ Complete | 6 | 357 tests; bounded 3D flow field — **flat 0.75 ms at any map size**; stairs; migration |
+| M14 | Metagame events & the shutoff clock | 🟡 Next | — | The helicopter; water and power failing on a schedule |
 | M15 | Water, fire and food | ⬜ Planned | — | Rain collectors, campfires, cooking, generators |
 | M16 | Full carpentry | ⬜ Planned | — | Placeable furniture and storage, built walls, barricade repair |
 | M17 | The world beyond houses | ⬜ Planned | — | Shops, warehouse, fuel station; loot tables per archetype |

@@ -50,6 +50,10 @@ const SHOTS = [
   // A barricaded window with the dead working on it, at night with a torch lit.
   { name: '13-siege', rotation: 0, zoom: 0, siege: true },
   { name: '14-death', rotation: 0, zoom: 2, death: true, skills: true, profile: true },
+  // M13: the dead following you upstairs. Before this milestone the flow field
+  // was one storey and an upstairs zombie could only wander, so a first floor
+  // was a place you could always retreat to.
+  { name: '15-upstairs-chase', rotation: 0, zoom: 0, upstairsChase: true },
 ];
 
 /**
@@ -339,6 +343,75 @@ try {
         av.body.pain = 0;
         return { staged: ring.length, kills: window.__knox.combat.stats.kills };
       }
+      if (s.upstairsChase) {
+        const { avatar: av, town: t, world: w, horde: hs, isoCamera: cam } = window.__knox;
+        const g = w.grid;
+        // Find a building with a staircase, and the landing at the top of it.
+        let landing = null;
+        outer2: for (const b of t.buildings) {
+          if (b.rect.storeys < 2) continue;
+          for (let z = b.rect.z; z < b.rect.z + b.rect.d; z++) {
+            for (let x = b.rect.x; x < b.rect.x + b.rect.w; x++) {
+              if (g.descendFrom(x, z, 1) === 0) {
+                landing = { x, z, building: b };
+                break outer2;
+              }
+            }
+          }
+        }
+        if (!landing) return { landing: 'none found' };
+
+        // Stand the player upstairs, away from the stairhead.
+        av.level = 1;
+        av.position.set(landing.x + 2.5, 2.6, landing.z + 0.5);
+        av.syncLevelHeight();
+        av.hasAim = false;
+        cam.snapTo(av.position);
+
+        // Put the dead at the foot of the flight and let the real systems carry
+        // them up: rebuild the field, then run the sim. Staging them on the
+        // upper storey directly would prove nothing at all.
+        const h = hs.horde;
+        let brought = 0;
+        for (let i = 0; i < h.count && brought < 10; i++) {
+          if (h.state[i] === 4) continue;
+          h.x[i] = landing.x + 0.5;
+          h.z[i] = landing.z + 0.5 + (brought % 3) - 1;
+          h.level[i] = 0;
+          h.state[i] = 3; // CHASE
+          h.attention[i] = 1;
+          h.health[i] = 100;
+          h.busy[i] = 0;
+          h._climbTimer[i] = 0.1;
+          brought++;
+        }
+        const tile = av.tile();
+        hs.flow.build([{ x: tile.x, z: tile.z, level: 1 }], 500);
+        for (let step = 0; step < 120; step++) {
+          for (let i = 0; i < h.count; i++) if (h.state[i] === 3) h.attention[i] = 1;
+          h.update(1 / 30, { x: tile.x, z: tile.z, level: 1 });
+        }
+        let upstairs = 0;
+        for (let i = 0; i < h.count; i++) {
+          if (h.state[i] !== 4 && h.level[i] === 1) upstairs++;
+          // Ten chasers in a bedroom is correctly fatal, and a screenshot of the
+          // death card is not what this shot is for. Hold them off long enough
+          // for the camera to settle.
+          if (h.level[i] === 1) h.cooldown[i] = 30;
+        }
+        av.body.health.fill(100);
+        av.body.bleed.fill(0);
+        av.body.pain = 0;
+        av.body.alive = true;
+        av.body.causeOfDeath = null;
+        window.__knox.hud.el['hud-death'].classList.add('hidden');
+        // Daylight: shot 13 leaves the clock at two in the morning, and this
+        // shot is about where the bodies are rather than about the dark.
+        window.__knox.clock.elapsed =
+          Math.floor(window.__knox.clock.elapsed / 86400) * 86400 + 11 * 3600;
+        return { brought, upstairs, landing: `${landing.x},${landing.z}` };
+      }
+
       if (s.indoors) {
         // Step one tile in from a two-storey building's front door.
         const b = town.buildings.find((x) => x.rect.storeys > 1) ?? town.buildings[0];

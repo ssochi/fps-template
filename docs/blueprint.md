@@ -112,7 +112,8 @@ src/
     HordeSystem.js     the driver
     FlowField.js       bucketed Dijkstra; costs inlined against raw arrays
     Sight.js           Amanatides & Woo DDA, so sight cannot leak diagonally
-    Sound.js           attenuated flood fill; loudestDirection()
+    Sound.js           attenuated flood fill, across storeys; loudestDirection()
+    Migration.js       coarse census: crowding repels, remembered noise draws
     Combat.js          owns proximity, so Horde stays ignorant of the player
     Body.js            six parts, bleeding, fracture, infection
     Moodles.js         seven tracks, each changing a number someone else reads
@@ -160,19 +161,21 @@ Settled bets, measured: **260 zombies in 2 draw calls** (VAT + one
 `InstancedMesh`), **AI for 400 in 0.22 ms/tick** (one flow-field sweep serves
 everyone).
 
-**The open problem, and cycle 2's largest architectural item:** the sweep is
-O(cells) over *the entire reachable map*, every rebuild. At 300² that is 270,000
-cells swept to steer zombies at most forty metres away, and it is what stops the
-map growing. The fix is not a faster sweep — it is **two fields**:
+**Solved in M13, and more cheaply than v2 expected.** The sweep was O(cells) over
+the entire reachable map. v2 proposed two fields — a fine one near the player and
+a coarse one over the whole map for off-screen agents. Building it revealed the
+second field was unnecessary: a zombie only ever *reads* the field when it is
+chasing, chasing requires having seen you, and sight reaches thirteen tiles. So
+**one bounded field** does the whole job, and an agent outside it falls back to
+hearing, which the horde has done since M5.
 
-- a **fine field**, bounded to a radius around the player, at full tile
-  resolution, which is what chasers read;
-- a **coarse field** on a heavily downsampled grid covering the whole map, which
-  is what everything off-screen drifts along.
+The sweep is now three-dimensional too, with stair links as ordinary edges, which
+is what closed the retreat upstairs. Measured: **0.75 ms and ~4,900 cells visited
+at every map size from 104² to 420²**, against 37 ms unbounded at 420².
 
-The coarse field is also exactly what **migration** needs, so one change closes
-the scaling wall and the biggest behavioural gap together. Stair edges enter
-both sweeps, which is what finally makes upstairs zombies path.
+**Migration** did not need the coarse *field*, but it did need the coarse *grid*:
+`sim/Migration.js` keeps a 4 × 4-tile census where crowding repels and remembered
+noise draws, so a cleared street refills from its neighbours.
 
 ## 7. Look
 
@@ -254,7 +257,7 @@ happens when a module loads. The M13 entry below is discharged.
 
 | Risk | Mitigation |
 | --- | --- |
-| The two-field horde desyncs — zombies teleport at the radius boundary | Coarse cells hand off to fine cells at the seam, never the reverse; a test that walks an agent across the boundary and asserts continuity |
+| ~~The two-field horde desyncs at the radius boundary~~ | **Discharged in M13** — the second field turned out to be unnecessary, so there is no seam. One bounded field, hearing outside it |
 | Late game becomes busywork rather than tension — *the reference game's own acknowledged failure* | Every cycle 2 system must either **press** (migration, shutoff, events) or **be pressed on** (base, farm, vehicle). Anything that is neither is cut |
 | Vehicles are a physics project in disguise | Grid-collided, arcade handling on the same `moveOnGrid` primitive the player uses. No suspension, no rigid bodies |
 | `main.js` becomes unmaintainable as cycle 2 adds seven systems | Split it at M13, the first milestone that would grow it |

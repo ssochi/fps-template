@@ -195,18 +195,67 @@ describe('storeys', () => {
     expect(p.position.y).toBeCloseTo(STOREY);
   });
 
-  it('descends through a stairwell opening', () => {
+  /**
+   * The staircase M2 generates, in full: two steps on the lower storey, the
+   * ceiling above the bottom step opened out, and the cell above the top step
+   * left solid as a landing.
+   */
+  function twoStorey() {
     const g = room(10, 10, 2);
+    g.setObject(5, 4, 0, packObject(OBJ.STAIRS_LOW, DIR.E));
+    g.setObject(6, 4, 0, packObject(OBJ.STAIRS_HIGH, DIR.E));
     g.setFloor(5, 4, 1, FLOOR.VOID);
+    return g;
+  }
+
+  it('descends by walking, not only by being placed on a hole', () => {
+    // Before M13 this test placed the player on the void tile by hand, with a
+    // comment saying `canWalk` refuses to enter it. That comment was the bug:
+    // nothing in the game could ever reach that cell, so going upstairs was a
+    // one-way trip. Descent now uses the landing above the top step, which is
+    // somewhere you can actually stand and walk onto.
+    const g = twoStorey();
     const p = makePlayer(g, 4.5, 4.5);
-    p.level = 1;
-    p.syncLevelHeight();
     p.hasAim = false;
-    // canWalk refuses to enter a void tile, so place the player on it directly
-    // — this asserts the descent rule, not the pathing into it.
-    p.position.set(5.5, STOREY, 4.5);
-    p.update(intentTo(1, 0), 1 / 30);
+    simulate(p, intentTo(1, 0), 2);
+    expect(p.level).toBe(1);
+
+    // Step off the landing and come back to it: that is the whole round trip.
+    simulate(p, intentTo(1, 0), 1.5);
+    expect(p.level).toBe(1);
+    simulate(p, intentTo(-1, 0), 2);
     expect(p.level).toBe(0);
+  });
+
+  it('does not oscillate while standing on the join', () => {
+    const g = twoStorey();
+    const p = makePlayer(g, 4.5, 4.5);
+    p.hasAim = false;
+    simulate(p, intentTo(1, 0), 2);
+    const landed = p.level;
+    // Keep pushing into the same tile. Without the cooldown the two storeys
+    // join at one column and the player flips between them every tick.
+    let flips = 0;
+    let previous = landed;
+    for (let i = 0; i < 60; i++) {
+      p.update(intentTo(0, 0.02), 1 / 30);
+      if (p.level !== previous) flips++;
+      previous = p.level;
+    }
+    expect(flips).toBeLessThanOrEqual(1);
+  });
+
+  it('agrees with the grid about where the stairs are', () => {
+    const g = twoStorey();
+    // The top step climbs; the landing above it descends. One column, both ways.
+    expect(g.climbFrom(6, 4, 0)).toBe(1);
+    expect(g.descendFrom(6, 4, 1)).toBe(0);
+    // The bottom step does neither: its ceiling is a hole, not a staircase.
+    expect(g.climbFrom(5, 4, 0)).toBe(-1);
+    expect(g.descendFrom(5, 4, 1)).toBe(-1);
+    // And plain floor is plain floor.
+    expect(g.climbFrom(2, 2, 0)).toBe(-1);
+    expect(g.descendFrom(2, 2, 1)).toBe(-1);
   });
 });
 
