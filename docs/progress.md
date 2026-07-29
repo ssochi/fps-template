@@ -5,8 +5,8 @@ Cycle 1 (M0 – M10). An Exploration milestone opens each cycle.
 | # | Milestone | Status | Passes | Notes |
 | --- | --- | --- | --- | --- |
 | M0 | Exploration | ✅ Complete | 1 | Blueprint v1 published |
-| M1 | Engine core & isometric camera | 🟡 In progress | – | |
-| M2 | Town generation | ⬜ Not started | – | |
+| M1 | Engine core & isometric camera | ✅ Complete | 7 | 46 tests; 22 draws / 8.8k tris on the test block |
+| M2 | Town generation | 🟡 Next | – | |
 | M3 | Player & movement | ⬜ Not started | – | |
 | M4 | Occlusion & vision | ⬜ Not started | – | |
 | M5 | The horde | ⬜ Not started | – | |
