@@ -92,37 +92,49 @@ describe('endurance', () => {
   });
 });
 
-describe('facing and backpedalling', () => {
-  it('faces the aim target rather than the direction of travel', () => {
+/**
+ * M3 made the body track the cursor at all times. M14 changed it after the
+ * first playtest, which reported — correctly — that walking looked like being
+ * dragged sideways: the pointer starts at the centre of the screen, which is
+ * where the player is standing, so a survivor who has not touched the mouse
+ * faces an arbitrary point a metre from their own feet.
+ */
+describe('facing', () => {
+  it('faces the direction of travel while moving, whatever the cursor says', () => {
     const p = makePlayer(room());
-    p.aimTarget.set(9, 0, 4.5); // due east
+    p.aimTarget.set(9, 0, 4.5); // cursor due east
     p.hasAim = true;
-    // Move west while aiming east.
-    simulate(p, intentTo(-1, 0), 1);
+    simulate(p, intentTo(-1, 0), 1); // walking west
     const f = p.forward();
-    expect(f.x).toBeGreaterThan(0.9);
+    expect(f.x).toBeLessThan(-0.9);
   });
 
-  it('moves slower backwards than forwards', () => {
-    const forwardSpeed = () => {
-      const p = makePlayer(room(40, 40), 20.5, 20.5);
-      p.aimTarget.set(39, 0, 20.5);
-      p.hasAim = true;
-      simulate(p, intentTo(1, 0), 1); // let facing settle
-      const before = p.position.x;
-      simulate(p, intentTo(1, 0), 0.5);
-      return Math.abs(p.position.x - before);
-    };
-    const backwardSpeed = () => {
-      const p = makePlayer(room(40, 40), 20.5, 20.5);
-      p.aimTarget.set(39, 0, 20.5);
-      p.hasAim = true;
-      simulate(p, still, 1);
-      const before = p.position.x;
-      simulate(p, intentTo(-1, 0), 0.5);
-      return Math.abs(p.position.x - before);
-    };
-    expect(backwardSpeed()).toBeLessThan(forwardSpeed() * 0.8);
+  it('falls back to the cursor when standing still, so you can still aim', () => {
+    const p = makePlayer(room());
+    p.aimTarget.set(9, 0, 4.5);
+    p.hasAim = true;
+    simulate(p, still, 1);
+    expect(p.forward().x).toBeGreaterThan(0.9);
+  });
+
+  it('snaps to the cursor for a swing, so you hit what you clicked', () => {
+    const p = makePlayer(room());
+    p.aimTarget.set(9, 0, 4.5); // east
+    p.hasAim = true;
+    simulate(p, intentTo(-1, 0), 1); // facing west from walking
+    expect(p.forward().x).toBeLessThan(-0.9);
+    p.aimNow();
+    expect(p.forward().x).toBeGreaterThan(0.9);
+  });
+
+  it('holds its heading when the cursor has never moved', () => {
+    // The bug that prompted the change: `hasAim` is false until the pointer is
+    // used, and before M14 that was the *only* thing keeping the player from
+    // spinning to face themselves.
+    const p = makePlayer(room());
+    p.hasAim = false;
+    simulate(p, intentTo(0, 1), 1);
+    expect(p.forward().z).toBeGreaterThan(0.9);
   });
 });
 

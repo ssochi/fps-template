@@ -7,15 +7,20 @@
  *
  * ## Skipping the menu
  *
- * `?autostart` boots straight into a run, optionally with `?seed=` and
- * `?traits=a,b`. That exists for the screenshot gate — a still frame cannot
- * click a Begin button — and it is a query parameter rather than a debug flag
- * so the smoke test drives the same code path a player does.
+ * `?autostart` boots straight into a run, optionally with `?seed=`,
+ * `?traits=a,b` and `?population=`. That exists for the screenshot gate — a
+ * still frame cannot click a Begin button — and it is a query parameter rather
+ * than a debug flag so the smoke test drives the same code path a player does.
+ *
+ * `?lang=` forces a language; otherwise the browser decides.
  */
 import { createGame } from './Game.js';
-import { MainMenu, randomProfile } from './ui/MainMenu.js';
+import { MainMenu, POPULATION_BY_ID, randomProfile } from './ui/MainMenu.js';
 import { Profile } from './sim/Traits.js';
+import { detectLanguage } from './ui/i18n.js';
 import * as Save from './save/Save.js';
+
+detectLanguage(location.search, navigator.languages ?? [navigator.language]);
 
 const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('app'));
 const params = new URLSearchParams(location.search);
@@ -27,6 +32,7 @@ if (params.has('autostart')) {
   choice = {
     action: 'new',
     seed: params.get('seed') || 'knox-county',
+    population: params.get('population') || 'normal',
     profile: params.has('traits')
       ? new Profile({ traits: params.get('traits').split(',').filter(Boolean) })
       : params.has('random')
@@ -46,11 +52,17 @@ const profile =
     : choice.profile;
 
 const seed = choice.action === 'continue' && saved ? saved.seed : choice.seed;
+const population = POPULATION_BY_ID.get(choice.population ?? 'normal')?.count ?? 90;
 
 const game = createGame({
   canvas,
   seed,
   profile,
+  population,
+  // A new survivor gets the controls screen unasked. Continuing does not: you
+  // have played this run before, and a modal you have to dismiss every time you
+  // come back is the thing that makes players stop reading modals.
+  showHelp: choice.action !== 'continue' && !params.has('nohelp'),
   // Restarting from the death card returns to the menu rather than reloading
   // into the same character: the run is over, so the choice should be live again.
   onRestart: () => window.location.assign(window.location.pathname),

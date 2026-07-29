@@ -13,6 +13,8 @@
  */
 
 /** Real seconds per in-game day. One hour of play is roughly two in-game days. */
+import { t } from '../ui/i18n.js';
+
 export const REAL_SECONDS_PER_DAY = 1800;
 
 const SECONDS_PER_DAY = 24 * 3600;
@@ -125,11 +127,21 @@ export class Clock {
     return { elevation, azimuth };
   }
 
-  /** "Day 3 — Tuesday 14:05" */
+  /**
+   * "Day 3 · Tuesday 14:05", or the same in whatever language is loaded.
+   *
+   * The clock is the one HUD element that is on screen every frame of every
+   * run, so it is worth it reading naturally rather than being the one line of
+   * English left in a Chinese interface.
+   */
   format() {
     const h = String(this.hour).padStart(2, '0');
     const m = String(this.minute).padStart(2, '0');
-    return `Day ${this.day + 1} · ${DAY_NAMES[(this.day + 2) % 7]} ${h}:${m}`;
+    const weekday = (this.day + 2) % 7;
+    return (
+      `${t('time.day', `Day ${this.day + 1}`, { n: this.day + 1 })} · ` +
+      `${t(`weekday.${weekday}`, DAY_NAMES[weekday])} ${h}:${m}`
+    );
   }
 
   /** Calendar date, counting from an outbreak on 9 July. */
@@ -142,7 +154,7 @@ export class Clock {
       d -= lengths[month];
       month = (month + 1) % 12;
     }
-    return `${d} ${MONTH_NAMES[month]}`;
+    return t('date.format', `${d} ${MONTH_NAMES[month]}`, { d, month: month + 1 });
   }
 }
 

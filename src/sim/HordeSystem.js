@@ -180,9 +180,12 @@ export class HordeSystem {
     this.stats = { instances: 0, rebuilds: 0 };
   }
 
-  /** @param {number} n how many to scatter across the town */
-  populate(n) {
-    return this.horde.populate(n);
+  /**
+   * @param {number} n how many to scatter across the town
+   * @param {{ x: number, z: number, radius: number }} [clearAround]
+   */
+  populate(n, clearAround) {
+    return this.horde.populate(n, undefined, clearAround);
   }
 
   /**

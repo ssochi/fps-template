@@ -164,18 +164,32 @@ export class Horde {
 
   /**
    * Scatter zombies over walkable outdoor and indoor tiles.
+   *
+   * `clearAround` keeps a radius free at the start. Without it the very first
+   * thing a new survivor sees is a street with a dozen of them already on it,
+   * which is not tension — it is a loss screen with extra steps. The town is
+   * still full; it just is not full *here*, yet, and M13's migration means that
+   * will not stay true.
+   *
    * @param {number} n
    * @param {(x: number, z: number, level: number) => boolean} [accept]
+   * @param {{ x: number, z: number, radius: number }} [clearAround]
    */
-  populate(n, accept) {
+  populate(n, accept, clearAround = null) {
     const grid = this.grid;
     let placed = 0;
     let attempts = 0;
+    const r2 = clearAround ? clearAround.radius * clearAround.radius : 0;
     while (placed < n && attempts < n * 60) {
       attempts++;
       const x = this.rng.int(0, grid.width - 1);
       const z = this.rng.int(0, grid.depth - 1);
       if (!grid.isWalkable(x, z, 0)) continue;
+      if (clearAround) {
+        const dx = x - clearAround.x;
+        const dz = z - clearAround.z;
+        if (dx * dx + dz * dz < r2) continue;
+      }
       if (accept && !accept(x, z, 0)) continue;
       if (this.spawn(x, z, 0) >= 0) placed++;
     }
@@ -424,11 +438,16 @@ export class Horde {
     const goalZ = nz + 0.5;
     const dx = goalX - this.x[i];
     const dz = goalZ - this.z[i];
-    const dist = Math.hypot(dx, dz) || 1;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 1e-4) return;
     const step = Math.min(speed * dt, dist);
 
     this.x[i] += (dx / dist) * step;
     this.z[i] += (dz / dist) * step;
+    // Only while there is actually somewhere to go. Standing exactly on the
+    // tile centre makes the delta zero, and `atan2(-0, -0)` is 0 — so a zombie
+    // arriving dead-centre used to snap to due north for a frame, which across
+    // a crowd reads as a twitch running through it.
     this.yaw[i] = Math.atan2(-dx, -dz);
   }
 

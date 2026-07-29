@@ -31,6 +31,7 @@ export const ACTION = {
   EQUIP: 'equip',
   TREAT: 'treat',
   TORCH: 'torch',
+  HELP: 'help',
 };
 
 const DEFAULT_BINDINGS = {
@@ -58,6 +59,8 @@ const DEFAULT_BINDINGS = {
   KeyF: ACTION.CONSUME,
   KeyG: ACTION.EQUIP,
   KeyH: ACTION.TREAT,
+  Slash: ACTION.HELP,
+  F1: ACTION.HELP,
   KeyL: ACTION.TORCH,
 };
 

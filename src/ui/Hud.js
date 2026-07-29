@@ -12,11 +12,14 @@
  * answer "am I in trouble?" from peripheral vision alone.
  */
 import { events } from '../core/Events.js';
+import { t } from './i18n.js';
 
 /** Colour per moodle tier — muted at tier 1, alarming at tier 4. */
 const TIER_COLOR = ['#8a9099', '#b9b06a', '#c99a52', '#c96f4a', '#c94a4a'];
 
-const PART_LABELS = ['Head', 'Torso', 'L Arm', 'R Arm', 'L Leg', 'R Leg'];
+const PART_KEYS = ['part.head', 'part.torso', 'part.armL', 'part.armR', 'part.legL', 'part.legR'];
+const PART_EN = ['Head', 'Torso', 'L Arm', 'R Arm', 'L Leg', 'R Leg'];
+const partLabel = (i) => t(PART_KEYS[i], PART_EN[i]);
 
 export class Hud {
   constructor(root = document.getElementById('hud')) {
@@ -53,11 +56,11 @@ export class Hud {
       </div>
       <div id="hud-bottom">
         <div id="hud-bars">
-          <div class="bar"><span>HP</span><em><i id="bar-health"></i></em></div>
-          <div class="bar"><span>END</span><em><i id="bar-endurance"></i></em></div>
+          <div class="bar"><span>${t('hud.hp', 'HP')}</span><em><i id="bar-health"></i></em></div>
+          <div class="bar"><span>${t('hud.end', 'END')}</span><em><i id="bar-endurance"></i></em></div>
         </div>
         <div id="hud-weapon"></div>
-        <div id="hud-help">WASD move · mouse aim · LMB attack · RMB shove · shift run · ctrl sneak · E interact · Q/. rotate · wheel zoom</div>
+        <div id="hud-help">${t('hud.help', 'WASD move · LMB attack · RMB shove · shift run · ctrl sneak · E interact · Tab bag · / controls')}</div>
       </div>
       <div id="hud-death" class="hidden"></div>
     `;
@@ -103,15 +106,16 @@ export class Hud {
     const w = player.weapon;
     const cond = Math.round(w.conditionFraction * 100);
     this.el['hud-weapon'].innerHTML =
-      `<b>${w.def.name}</b>${w.broken ? ' <em>broken</em>' : ` <span>${cond}%</span>`}` +
-      (moodles.asleep ? ' &nbsp;·&nbsp; <em>asleep</em>' : '');
+      `<b>${t(`weapon.${w.def.id}`, w.def.name)}</b>` +
+      `${w.broken ? ` <em>${t('hud.broken', 'broken')}</em>` : ` <span>${cond}%</span>`}` +
+      (moodles.asleep ? ` &nbsp;·&nbsp; <em>${t('hud.asleep', 'asleep')}</em>` : '');
   }
 
   /** Only skills above zero: an empty sheet is noise. */
   _renderSkills(skills) {
     const learned = skills.summary().filter((s) => s.level > 0);
     const html = learned
-      .map((s) => `<div class="skill"><span>${s.name}</span><b>${s.level}</b></div>`)
+      .map((s) => `<div class="skill"><span>${t(`skill.${s.id}`, s.name)}</span><b>${s.level}</b></div>`)
       .join('');
     if (html === this._skillHtml) return;
     this._skillHtml = html;
@@ -124,7 +128,7 @@ export class Hud {
       .map(
         (m) =>
           `<div class="moodle" style="border-color:${TIER_COLOR[m.tier]}">` +
-          `<b style="color:${TIER_COLOR[m.tier]}">${m.label}</b></div>`,
+          `<b style="color:${TIER_COLOR[m.tier]}">${t(`moodle.${m.id}.${m.tier}`, m.label)}</b></div>`,
       )
       .join('');
     // Only touch the DOM when it actually changed; this runs several times a
@@ -144,7 +148,7 @@ export class Hud {
       const broken = body.fractured[i];
       const colour = h > 70 ? '#6f9f68' : h > 35 ? '#c9a052' : '#c94a4a';
       rows.push(
-        `<div class="part"><span>${PART_LABELS[i]}</span>` +
+        `<div class="part"><span>${partLabel(i)}</span>` +
           `<i style="width:${h}%;background:${colour}"></i>` +
           `${bleeding ? '<u title="bleeding">•</u>' : ''}` +
           `${broken ? '<s title="fractured">/</s>' : ''}</div>`,
@@ -152,7 +156,7 @@ export class Hud {
     }
     const cls = flashing ? 'hit' : '';
     const infection = body.infected
-      ? `<div class="infection">Infected · ${(body.infection * 100).toFixed(1)}%</div>`
+      ? `<div class="infection">${t('hud.infected', 'Infected')} · ${(body.infection * 100).toFixed(1)}%</div>`
       : '';
     this.el['hud-body'].className = cls;
     this.el['hud-body'].innerHTML = rows.join('') + infection;
@@ -179,20 +183,22 @@ export class Hud {
     // the cause rather than only on the screen where you picked them.
     const chosen = profile.length
       ? `<p class="chosen">${profile
-          .map((d) => `<span class="${d.kind}">${d.name}</span>`)
+          .map((d) => `<span class="${d.kind}">${t(d.key ?? '', d.name)}</span>`)
           .join('')}</p>`
       : '';
     el.innerHTML = `
       <div class="death-card">
-        <h1>This is how ${name ? `${escapeHtml(name)}` : 'you'} died</h1>
+        <h1>${name
+          ? t('death.title', 'This is how {name} died', { name: escapeHtml(name) })
+          : t('death.title.you', 'This is how you died')}</h1>
         <p class="cause">${cause}</p>
         <dl>
-          <div><dt>Survived</dt><dd>${days ?? '—'}</dd></div>
-          <div><dt>Zombies killed</dt><dd>${kills ?? 0}</dd></div>
+          <div><dt>${t('death.survived', 'Survived')}</dt><dd>${days ?? '—'}</dd></div>
+          <div><dt>${t('death.kills', 'Zombies killed')}</dt><dd>${kills ?? 0}</dd></div>
         </dl>
         ${chosen}
         ${learned}
-        <button id="death-restart">Begin again</button>
+        <button id="death-restart">${t('death.restart', 'Begin again')}</button>
       </div>
     `;
     const button = el.querySelector('#death-restart');

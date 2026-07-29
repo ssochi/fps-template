@@ -34,16 +34,17 @@ reasoning in [`blueprint.md` §8](./blueprint.md).
 | M11 | Exploration (opens cycle 2) | ✅ Complete | 1 | Blueprint **v2** published; flow-field scaling wall identified; dead `Walker` class removed |
 | M12 | Character creation & the main menu | ✅ Complete | 5 | 326 tests; 25 traits / 9 occupations, autosave, `main.js` 411 → 52 lines |
 | M13 | The horde that moves | ✅ Complete | 6 | 357 tests; bounded 3D flow field — **flat 0.75 ms at any map size**; stairs; migration |
-| M14 | Metagame events & the shutoff clock | 🟡 Next | — | The helicopter; water and power failing on a schedule |
-| M15 | Water, fire and food | ⬜ Planned | — | Rain collectors, campfires, cooking, generators |
-| M16 | Full carpentry | ⬜ Planned | — | Placeable furniture and storage, built walls, barricade repair |
-| M17 | The world beyond houses | ⬜ Planned | — | Shops, warehouse, fuel station; loot tables per archetype |
-| M18 | Vehicles | ⬜ Planned | — | Keys, hotwiring, fuel, parts, mobile storage |
-| M19 | Farming, foraging and animals | ⬜ Planned | — | The month-two food answer |
-| M20 | Streaming & scale | ⬜ Planned | — | 300² map, chunked simulation, mesh streaming |
-| M21 | Meta-progression & polish | ⬜ Planned | — | Autosave, save slots, sandbox settings — **closes cycle 2** |
+| M14 | **Playable** | ✅ Complete | 4 | 380 tests; 中文 UI, controls screen, a marker you can find, facing follows travel, 260 → 90 zombies |
+| M15 | Metagame events & the shutoff clock | 🟡 Next | — | The helicopter; water and power failing on a schedule. *Was M14; deferred by playtest feedback* |
+| M16 | Water, fire and food | ⬜ Planned | — | Rain collectors, campfires, cooking, generators |
+| M17 | Full carpentry | ⬜ Planned | — | Placeable furniture and storage, built walls, barricade repair |
+| M18 | The world beyond houses | ⬜ Planned | — | Shops, warehouse, fuel station; loot tables per archetype |
+| M19 | Vehicles | ⬜ Planned | — | Keys, hotwiring, fuel, parts, mobile storage |
+| M20 | Farming, foraging and animals | ⬜ Planned | — | The month-two food answer |
+| M21 | Streaming & scale | ⬜ Planned | — | 300² map, chunked simulation, mesh streaming — **closes cycle 2** |
 
-**M22 opens cycle 3** as a fresh Exploration milestone.
+**M22 opens cycle 3** as a fresh Exploration milestone. Meta-progression and
+polish — save slots, sandbox settings — folded into M14's work and M21.
 
 ## Notes on the process
 
@@ -54,6 +55,11 @@ reasoning in [`blueprint.md` §8](./blueprint.md).
   7 → 4 as milestones shifted from building systems to connecting them. M16–M20
   build new systems; if they land in three passes, suspect the verification
   rather than celebrate the velocity.
+- **Review at least one screenshot as a player, not as a renderer.** M14 was an
+  unplanned milestone built entirely from six lines of playtest feedback, and
+  five of the six complaints were visible in `01-default.png` — a frame that had
+  been reviewed eleven times as a *rendering* regression test and never once as
+  the first thing somebody sees.
 - **Look for getters nothing reads, not only exports nothing imports.** M12 found
   two effects — `Skills.noiseScale` and `Moodles.enduranceRecovery` — that had
   been computed and thrown away for two milestones. M11's dead-code survey missed

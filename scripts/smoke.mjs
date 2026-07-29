@@ -15,7 +15,10 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const PORT = 5178;
-const APP_URL = `http://127.0.0.1:${PORT}/`;
+// Chinese, because that is what the game now defaults to for a Chinese browser
+// and the screenshots are the only place a mis-sized or overflowing label shows.
+const APP_URL = `http://127.0.0.1:${PORT}/?lang=zh`;
+const APP_ROOT = `http://127.0.0.1:${PORT}/`;
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUT = fileURLToPath(new URL('../shots/', import.meta.url));
 
@@ -65,6 +68,9 @@ const MENU_SHOTS = [
   { name: '00b-creation', screen: 'create' },
 ];
 
+/** The controls screen, which a new survivor now gets unasked. */
+const HELP_SHOT = '00c-controls';
+
 const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
   cwd: ROOT,
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -77,7 +83,7 @@ async function waitForServer(timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      if ((await fetch(APP_URL)).ok) return;
+      if ((await fetch(APP_ROOT)).ok) return;
     } catch {
       /* not up yet */
     }
@@ -125,7 +131,11 @@ try {
   }
 
   // --- the run ----------------------------------------------------------
-  await page.goto(`${APP_URL}?autostart`, { waitUntil: 'networkidle' });
+  // Booting without `nohelp` is what a new player gets, so capture that first.
+  await page.goto(`${APP_URL}&autostart`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('#help:not(.hidden)', { timeout: 15000 });
+  await page.screenshot({ path: `${OUT}${HELP_SHOT}.png` });
+  await page.evaluate(() => window.__knox.help.hide());
   await page.waitForFunction(() => window.__knox && window.__knox.loop.frame > 20, { timeout: 20000 });
 
   for (const shot of SHOTS) {

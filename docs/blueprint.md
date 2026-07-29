@@ -105,6 +105,7 @@ src/
     Entity.js          transform + facing
     Character.js       segmented rigid-part humanoid; one pose function, shared
                        between the VAT baker and gameplay
+    Marker.js          the silhouette that shows you through a wall
     Player.js          endurance, aiming, doors, stairs, vaulting, items
     Walker.js          moveOnGrid — axis-at-a-time grid collision
   sim/
@@ -130,6 +131,8 @@ src/
   ui/
     Hud.js, Panels.js  DOM, not canvas
     MainMenu.js        title and character creation
+    Help.js            the controls screen, shown unasked on a new run
+    i18n.js            lookup with the English name as the fallback
   save/Save.js         seed + deltas into IndexedDB; fog deliberately not saved
 ```
 
@@ -195,14 +198,21 @@ answer.
 | --- | --- | --- |
 | M12 | **Character creation & the main menu** | Why is *this run* different from the last? |
 | M13 | **The horde that moves** | Why does the neighbourhood I cleared stop being safe? |
-| M14 | **Metagame events & the shutoff clock** | Why does the world get harder on its own? |
-| M15 | **Water, fire and food** | What do I do when the taps run dry? |
-| M16 | **Full carpentry** | Why is this building *mine*? |
-| M17 | **The world beyond houses** | Why walk two streets further? |
-| M18 | **Vehicles** | Why is a supply run a different activity from a loot run? |
-| M19 | **Farming, foraging and animals** | What do I eat in month two? |
-| M20 | **Streaming & scale** | Why is the map bigger than a neighbourhood? |
-| M21 | **Meta-progression & polish** | *closes cycle 2* |
+| M14 | **Playable** | Can somebody who has never seen this play it? |
+| M15 | **Metagame events & the shutoff clock** | Why does the world get harder on its own? |
+| M16 | **Water, fire and food** | What do I do when the taps run dry? |
+| M17 | **Full carpentry** | Why is this building *mine*? |
+| M18 | **The world beyond houses** | Why walk two streets further? |
+| M19 | **Vehicles** | Why is a supply run a different activity from a loot run? |
+| M20 | **Farming, foraging and animals** | What do I eat in month two? |
+| M21 | **Streaming & scale** | Why is the map bigger than a neighbourhood? *closes cycle 2* |
+
+**Amendment (M14).** M14 was not on this plan. A playtest reported six things —
+no Chinese, an invisible character, facing that ignored travel, twitching
+zombies, far too many of them, and no idea what any key did — and every one was
+right. Everything below shifted by one. The lesson is recorded in
+[`progress.md`](./progress.md): a screenshot gate that only ever asks "is this
+rendered correctly" will not tell you the game cannot be played.
 
 **M12 — Character creation & the main menu.** Traits (positive and negative,
 paid for from one budget), occupations that seed starting skills, and the

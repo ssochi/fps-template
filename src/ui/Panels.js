@@ -11,6 +11,7 @@
  */
 import { events } from '../core/Events.js';
 import { RECIPES, canCraft } from '../items/Recipes.js';
+import { t } from './i18n.js';
 
 export class Panels {
   /**
@@ -72,23 +73,27 @@ export class Panels {
 
     this.el.innerHTML = `
       <div class="panel">
-        <header>Carried
+        <header>${t('panel.carrying', 'Carried')}
           <b style="color:${loadColour}">${inv.weight.toFixed(1)} / ${inv.capacity} kg</b>
         </header>
         ${this._list(inv, 'inv')}
-        ${inv.overloaded ? '<div class="warn">Overloaded — you are slow</div>' : ''}
+        ${inv.overloaded ? `<div class="warn">${t('panel.overloaded', 'Overloaded — you are slow')}</div>` : ''}
       </div>
       <div class="panel">
-        <header>${this.container ? this.container.name : 'Nothing here'}
+        <header>${this.container
+          ? t(`object.${this.container.name}`, this.container.name)
+          : t('panel.nothing', 'Nothing here')}
           ${this.container ? `<b>${this.container.weight.toFixed(1)} / ${this.container.capacity} kg</b>` : ''}
         </header>
-        ${this.container ? this._list(this.container, 'con') : '<div class="empty">Stand at a container and press E.</div>'}
+        ${this.container
+          ? this._list(this.container, 'con')
+          : `<div class="empty">${t('panel.searchHint', 'Stand at a container and press Tab.')}</div>`}
       </div>
       <div class="panel craft">
-        <header>Craft</header>
+        <header>${t('panel.craft', 'Craft')}</header>
         ${this._recipes()}
       </div>
-      <div class="hint">Click an item to move it or a recipe to make it · F eat · G equip · H treat · L torch · Tab close</div>
+      <div class="hint">${t('panel.hint', 'Click an item to move it or a recipe to make it · F eat · G equip · H treat · L torch · Tab close')}</div>
     `;
   }
 
@@ -99,22 +104,25 @@ export class Panels {
     return `<ul>${RECIPES.map((r, i) => {
       const check = canCraft(r, this.inventory, held);
       const cost = Object.entries(r.materials)
-        .map(([id, n]) => (n === 0 ? `${id} (held)` : `${id}×${n}`))
+        .map(([id, n]) => {
+          const label = t(`item.${id}`, id);
+          return n === 0 ? `${label} (${t('panel.held', 'held')})` : `${label}×${n}`;
+        })
         .join(', ');
       return (
         `<li class="${check.ok ? '' : 'blocked'}" data-recipe="${i}" title="${r.description}">` +
-        `<span>${r.name}</span><em>${cost}</em></li>`
+        `<span>${t(`recipe.${r.id}`, r.name)}</span><em>${cost}</em></li>`
       );
     }).join('')}</ul>`;
   }
 
   _list(container, side) {
-    if (container.isEmpty) return '<div class="empty">Empty</div>';
+    if (container.isEmpty) return `<div class="empty">${t('panel.empty', 'Empty')}</div>`;
     return `<ul>${container
       .sorted()
       .map((item, i) => {
         const spoil = item.def.perishable
-          ? `<u style="opacity:${0.25 + item.spoilage * 0.75}">${item.spoiled ? 'rotten' : `${Math.round((1 - item.spoilage) * 100)}%`}</u>`
+          ? `<u style="opacity:${0.25 + item.spoilage * 0.75}">${item.spoiled ? t('item.rotten', 'rotten') : `${Math.round((1 - item.spoilage) * 100)}%`}</u>`
           : '';
         return (
           `<li data-side="${side}" data-index="${i}">` +

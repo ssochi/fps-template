@@ -21,6 +21,24 @@
  * nothing at all.
  */
 import { OCCUPATIONS, Profile, TRAITS } from '../sim/Traits.js';
+import { t } from './i18n.js';
+
+/**
+ * How many of them there are.
+ *
+ * The first playtest of M12 said, unprompted and correctly, that there were far
+ * too many: a fixed 260 on a 104-tile town puts about twenty-five on screen at
+ * the default zoom on the morning of day one, which is not a survival game, it
+ * is a queue. Normal is now a third of that, and — since M13's migration keeps
+ * moving them — a quiet street is a temporary condition rather than a promise.
+ */
+export const POPULATIONS = [
+  { id: 'sparse', name: 'Sparse', count: 40, desc: 'One every few streets. Somewhere to learn the controls' },
+  { id: 'normal', name: 'Normal', count: 90, desc: 'The town has fallen, but you can still walk through it' },
+  { id: 'dense', name: 'Dense', count: 200, desc: 'They are everywhere. You will need to be careful' },
+];
+
+export const POPULATION_BY_ID = new Map(POPULATIONS.map((p) => [p.id, p]));
 
 export class MainMenu {
   /**
@@ -30,7 +48,10 @@ export class MainMenu {
    */
   constructor({ root = document.body, hasSave = false } = {}) {
     this.profile = Profile.default();
+    this.profile.name = t('menu.survivor', 'Survivor');
     this.hasSave = hasSave;
+    /** How crowded the town is. Playtesting said the old fixed 260 was far too many. */
+    this.population = 'normal';
     /** 'title' | 'create' */
     this.screen = 'title';
     /** Resolved with { action, profile, seed }. */
@@ -65,9 +86,9 @@ export class MainMenu {
   // --- interaction -------------------------------------------------------
 
   _onInput(e) {
-    const t = /** @type {HTMLInputElement} */ (e.target);
-    if (t.dataset.field === 'name') this.profile.name = t.value.slice(0, 24) || 'Survivor';
-    else if (t.dataset.field === 'seed') this.seed = t.value || 'knox-county';
+    const el = /** @type {HTMLInputElement} */ (e.target);
+    if (el.dataset.field === 'name') this.profile.name = el.value.slice(0, 24) || t('menu.survivor', 'Survivor');
+    else if (el.dataset.field === 'seed') this.seed = el.value || 'knox-county';
   }
 
   _onClick(e) {
@@ -88,6 +109,7 @@ export class MainMenu {
     } else if (act === 'trait') this.profile.toggle(id);
     else if (act === 'random') this.profile = randomProfile();
     else if (act === 'clear') this.profile = new Profile({ name: this.profile.name });
+    else if (act === 'help') { this._resolve?.({ action: 'help' }); return; }
     else if (act === 'begin') {
       if (!this.profile.valid) return;
       this._finish('new');
@@ -101,7 +123,9 @@ export class MainMenu {
 
   _finish(action) {
     this.dismiss();
-    this._resolve?.({ action, profile: this.profile, seed: this.seed });
+    this._resolve?.({
+      action, profile: this.profile, seed: this.seed, population: this.population,
+    });
     this._resolve = null;
   }
 
@@ -115,14 +139,14 @@ export class MainMenu {
     return `
       <div class="m-title">
         <h1>KNOX</h1>
-        <p class="m-tag">This is how you died.</p>
+        <p class="m-tag">${t('menu.tagline', 'This is how you died.')}</p>
         <div class="m-actions">
-          <button data-act="new" class="m-big">New Survivor</button>
+          <button data-act="new" class="m-big">${t('menu.new', 'New Survivor')}</button>
           <button data-act="continue" class="m-big" ${this.hasSave ? '' : 'disabled'}>
-            ${this.hasSave ? 'Continue' : 'No Save'}
+            ${this.hasSave ? t('menu.continue', 'Continue') : t('menu.nosave', 'No Save')}
           </button>
         </div>
-        <label class="m-seed">Town seed
+        <label class="m-seed">${t('menu.seed', 'Town seed')}
           <input data-field="seed" value="${esc(this.seed)}" spellcheck="false" />
         </label>
       </div>`;
@@ -135,23 +159,23 @@ export class MainMenu {
 
     const jobs = OCCUPATIONS.map((o) => `
       <button class="m-job ${o.id === p.occupation ? 'on' : ''}" data-act="occupation" data-id="${o.id}">
-        <span class="m-job-name">${o.name}</span>
+        <span class="m-job-name">${t(`job.${o.id}`, o.name)}</span>
         ${o.points ? `<span class="m-pts">+${o.points}</span>` : ''}
-        <span class="m-job-desc">${o.desc}</span>
+        <span class="m-job-desc">${t(`job.${o.id}.desc`, o.desc)}</span>
         <span class="m-job-skills">${describeSkills(o.skills)}</span>
       </button>`).join('');
 
     const column = (positive) => TRAITS
-      .filter((t) => (positive ? t.cost >= 0 : t.cost < 0))
-      .map((t) => {
-        const taken = p.traits.includes(t.id);
-        const why = taken ? null : p.refuses(t.id);
+      .filter((tr) => (positive ? tr.cost >= 0 : tr.cost < 0))
+      .map((tr) => {
+        const taken = p.traits.includes(tr.id);
+        const why = taken ? null : p.refuses(tr.id);
         return `
         <button class="m-trait ${positive ? 'pos' : 'neg'} ${taken ? 'on' : ''} ${why ? 'off' : ''}"
-                data-act="trait" data-id="${t.id}" title="${esc(why ?? t.desc)}">
-          <span class="m-trait-cost">${t.cost > 0 ? t.cost : `+${-t.cost}`}</span>
-          <span class="m-trait-name">${t.name}</span>
-          <span class="m-trait-desc">${t.desc}</span>
+                data-act="trait" data-id="${tr.id}" title="${esc(why ?? t(`trait.${tr.id}.desc`, tr.desc))}">
+          <span class="m-trait-cost">${tr.cost > 0 ? tr.cost : `+${-tr.cost}`}</span>
+          <span class="m-trait-name">${t(`trait.${tr.id}`, tr.name)}</span>
+          <span class="m-trait-desc">${t(`trait.${tr.id}.desc`, tr.desc)}</span>
         </button>`;
       }).join('');
 
@@ -161,35 +185,48 @@ export class MainMenu {
           <input data-field="name" class="m-name" value="${esc(p.name)}"
                  spellcheck="false" maxlength="24" />
           <div class="m-budget ${state}">
-            <strong>${left}</strong><span>point${left === 1 ? '' : 's'} left</span>
+            <strong>${left}</strong><span>${t('menu.points', 'points left')}</span>
           </div>
           <div class="m-head-actions">
-            <button data-act="random">Surprise Me</button>
-            <button data-act="clear">Clear</button>
-            <button data-act="back">Back</button>
+            <button data-act="random">${t('menu.random', 'Surprise Me')}</button>
+            <button data-act="clear">${t('menu.clear', 'Clear')}</button>
+            <button data-act="back">${t('menu.back', 'Back')}</button>
           </div>
         </header>
 
         <section class="m-jobs">
-          <h2>Occupation</h2>
+          <h2>${t('menu.occupation', 'Occupation')}</h2>
           <div class="m-job-grid">${jobs}</div>
+        </section>
+
+        <section class="m-jobs">
+          <h2>${t('menu.population', 'How crowded is the town')}</h2>
+          <div class="m-pop">
+            ${POPULATIONS.map((pop) => `
+              <button class="m-job ${pop.id === this.population ? 'on' : ''}"
+                      data-act="population" data-id="${pop.id}">
+                <span class="m-job-name">${t(`population.${pop.id}`, pop.name)}</span>
+                <span class="m-pts">${pop.count}</span>
+                <span class="m-job-desc">${t(`population.${pop.id}.desc`, pop.desc)}</span>
+              </button>`).join('')}
+          </div>
         </section>
 
         <section class="m-traits">
           <div>
-            <h2>Take <em>costs points</em></h2>
+            <h2>${t('menu.take', 'Take')} <em>${t('menu.take.hint', 'costs points')}</em></h2>
             <div class="m-trait-list">${column(true)}</div>
           </div>
           <div>
-            <h2>Give <em>earns points</em></h2>
+            <h2>${t('menu.give', 'Give')} <em>${t('menu.give.hint', 'earns points')}</em></h2>
             <div class="m-trait-list">${column(false)}</div>
           </div>
         </section>
 
         <footer>
-          <p class="m-summary">${p.describe().map((d) => d.name).join(' · ')}</p>
+          <p class="m-summary">${p.describe().map((d) => t(d.key, d.name)).join(' · ')}</p>
           <button data-act="begin" class="m-big" ${p.valid ? '' : 'disabled'}>
-            ${p.valid ? 'Begin' : 'Over budget'}
+            ${p.valid ? t('menu.begin', 'Begin') : t('menu.overbudget', 'Over budget')}
           </button>
         </footer>
       </div>`;
@@ -214,8 +251,8 @@ export function randomProfile(rand = Math.random) {
 }
 
 function describeSkills(skills) {
-  const parts = Object.entries(skills).map(([id, level]) => `${id} ${level}`);
-  return parts.length ? parts.join(', ') : 'no training';
+  const parts = Object.entries(skills).map(([id, level]) => `${t(`skill.${id}`, id)} ${level}`);
+  return parts.length ? parts.join('、') : t('menu.noTraining', 'no training');
 }
 
 function esc(s) {
@@ -286,6 +323,7 @@ const CSS = `
 #menu h2 em { font-style: normal; color: #4c5866; letter-spacing: .06em; }
 
 .m-job-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.m-pop { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .m-job {
   display: grid; grid-template-columns: 1fr auto; gap: 0 8px; text-align: left;
   background: #131a23; border: 1px solid #232e3a; border-radius: 3px; padding: 6px 10px;

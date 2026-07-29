@@ -25,6 +25,8 @@ import { Combat } from './sim/Combat.js';
 import { Clock } from './core/Clock.js';
 import { Moodles } from './sim/Moodles.js';
 import { Hud } from './ui/Hud.js';
+import { Help } from './ui/Help.js';
+import { t } from './ui/i18n.js';
 import { Panels } from './ui/Panels.js';
 import { LootSystem } from './items/Loot.js';
 import { Construction, Siege } from './sim/Construction.js';
@@ -52,12 +54,12 @@ const BASE_SIGHT = 17;
 const AUTOSAVE_INTERVAL = 90;
 
 const DEATH_CAUSES = {
-  wounds: 'Torn apart',
-  injuries: 'Died of your injuries',
-  'blood loss': 'Bled out',
-  infection: 'Turned',
-  starvation: 'Starved',
-  dehydration: 'Died of thirst',
+  wounds: ['death.wounds', 'Torn apart'],
+  injuries: ['death.injuries', 'Died of your injuries'],
+  'blood loss': ['death.bloodloss', 'Bled out'],
+  infection: ['death.infection', 'Turned'],
+  starvation: ['death.starvation', 'Starved'],
+  dehydration: ['death.dehydration', 'Died of thirst'],
 };
 
 /**
@@ -70,7 +72,9 @@ const DEATH_CAUSES = {
  * @param {() => void} [opts.onRestart] called when the death card's button is hit
  * @returns {object} the debug handle, also assigned to `window.__knox`
  */
-export function createGame({ canvas, seed, profile = Profile.default(), onRestart }) {
+export function createGame({
+  canvas, seed, profile = Profile.default(), population = 90, onRestart, showHelp = false,
+}) {
   const isoCamera = new IsoCamera({ aspect: window.innerWidth / window.innerHeight });
   const renderer = new Renderer(canvas, isoCamera);
   const input = new Input(canvas);
@@ -92,8 +96,12 @@ export function createGame({ canvas, seed, profile = Profile.default(), onRestar
   isoCamera.snapTo(avatar.position);
 
   // --- the horde ----------------------------------------------------------
-  const horde = new HordeSystem(renderer.scene, world, { capacity: 400 });
-  horde.populate(260);
+  const horde = new HordeSystem(renderer.scene, world, { capacity: 420 });
+  // Keep the spawn clear. The first thing a new survivor saw used to be a
+  // street with a dozen of them already on it, which is a loss screen with
+  // extra steps rather than tension — and M13's migration means the quiet does
+  // not last.
+  horde.populate(population, { x: spawn.x, z: spawn.z, radius: 16 });
 
   const combat = new Combat(horde.horde, avatar);
 
@@ -102,6 +110,9 @@ export function createGame({ canvas, seed, profile = Profile.default(), onRestar
   const moodles = new Moodles(avatar.body, profile);
   avatar.moodles = moodles;
   const hud = new Hud();
+  // The one-line hint along the bottom edge was never enough — see `ui/Help.js`.
+  const help = new Help();
+  if (showHelp) help.show();
 
   // --- looting ------------------------------------------------------------
   // Loot keys off the purpose M2's furnishing pass gave each room, so a fridge in
@@ -177,8 +188,8 @@ export function createGame({ canvas, seed, profile = Profile.default(), onRestar
   // how many you took with you. Assembling them here keeps Body ignorant of the UI.
   events.on('player:died', ({ cause }) => {
     hud.showDeath({
-      cause: DEATH_CAUSES[cause] ?? cause,
-      days: `${clock.day + 1} day${clock.day === 0 ? '' : 's'}`,
+      cause: DEATH_CAUSES[cause] ? t(...DEATH_CAUSES[cause]) : cause,
+      days: t('death.days', `${clock.day + 1} day${clock.day === 0 ? '' : 's'}`, { n: clock.day + 1 }),
       kills: combat.stats.kills,
       skills: skills.summary().filter((s2) => s2.level > 0),
       // Who you chose to be belongs on the screen that says how it went, because
@@ -262,8 +273,9 @@ export function createGame({ canvas, seed, profile = Profile.default(), onRestar
         }
       }
       if (input.wasPressed(ACTION.TORCH)) avatar.toggleTorch();
+      if (input.wasPressed(ACTION.HELP)) help.toggle();
 
-      if (!paused && !panels.open) {
+      if (!paused && !panels.open && !help.open) {
         updateAim();
 
         // Screen-relative movement: "up" is up the screen at any camera rotation.
@@ -280,11 +292,15 @@ export function createGame({ canvas, seed, profile = Profile.default(), onRestar
         // Swinging is only possible when not already committed to something.
         if (avatar.busy <= 0) {
           if (input.wasPressed(ACTION.ATTACK)) {
+            // Turn to the cursor first: since M14 the body faces where it is
+            // walking, so a swing has to say explicitly what it is aimed at.
+            avatar.aimNow();
             const result = combat.swing('attack');
             const trained = WEAPON_SKILL[avatar.weapon.def.id] ?? SKILL.BLUNT;
             if (result.hits) skills.award(trained, XP.hit * result.hits);
             if (result.kills) skills.award(trained, XP.kill * result.kills);
           } else if (input.wasPressed(ACTION.SHOVE)) {
+            avatar.aimNow();
             combat.swing('shove');
           }
         }
@@ -448,7 +464,7 @@ export function createGame({ canvas, seed, profile = Profile.default(), onRestar
 
   const game = {
     world, town, renderer, isoCamera, loop, avatar, input, horde, combat,
-    clock, moodles, hud, loot, panels, construction, siege, skills, audio,
+    clock, moodles, hud, help, loot, panels, construction, siege, skills, audio,
     profile,
     seed,
     Save,

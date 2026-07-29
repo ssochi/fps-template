@@ -18,6 +18,8 @@
  */
 
 /** What an item is for. Drives which panel actions it offers. */
+import { t } from '../ui/i18n.js';
+
 export const KIND = {
   FOOD: 'food',
   DRINK: 'drink',
@@ -139,12 +141,18 @@ export class Item {
     if (this.def.perishable) this.age += gameHours;
   }
 
-  /** How the item should read in a list. */
+  /**
+   * How the item should read in a list.
+   *
+   * The definition's English `name` is the fallback, so a missing translation
+   * shows readable English rather than a lookup key — see `ui/i18n.js`.
+   */
   label() {
-    const base = this.count > 1 ? `${this.def.name} ×${this.count}` : this.def.name;
+    const name = t(`item.${this.id}`, this.def.name);
+    const base = this.count > 1 ? `${name} ×${this.count}` : name;
     if (!this.def.perishable) return base;
-    if (this.spoiled) return `${base} (rotten)`;
-    if (this.spoilage > 0.65) return `${base} (stale)`;
+    if (this.spoiled) return `${base} ${t('item.rottenSuffix', '(rotten)')}`;
+    if (this.spoilage > 0.65) return `${base} ${t('item.staleSuffix', '(stale)')}`;
     return base;
   }
 

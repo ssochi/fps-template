@@ -329,11 +329,25 @@ export class Profile {
     return skills;
   }
 
-  /** One line per choice, for the character sheet and the death report. */
+  /**
+   * One line per choice, for the character sheet and the death report.
+   *
+   * Each entry carries its own translation `key` alongside the English `name`,
+   * so a caller localises with `t(entry.key, entry.name)` and never has to know
+   * whether it is holding an occupation or a trait.
+   */
   describe() {
     return [
-      { name: this.job.name, desc: this.job.desc, kind: 'occupation' },
+      {
+        id: this.job.id,
+        key: `job.${this.job.id}`,
+        name: this.job.name,
+        desc: this.job.desc,
+        kind: 'occupation',
+      },
       ...this.chosen.map((t) => ({
+        id: t.id,
+        key: `trait.${t.id}`,
         name: t.name,
         desc: t.desc,
         kind: t.cost >= 0 ? 'positive' : 'negative',

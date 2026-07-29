@@ -19,6 +19,7 @@
 import { Vector3 } from 'three';
 import { Entity } from './Entity.js';
 import { Character, GAITS } from './Character.js';
+import { CHARACTER_ORDER, Marker } from './Marker.js';
 import { moveOnGrid } from './Walker.js';
 import { DIR_VEC, STOREY, worldToTile } from '../core/constants.js';
 import { OBJ, objectId } from '../world/Objects.js';
@@ -40,9 +41,6 @@ const SPEED = {
   walk: 2.6,
   run: 5.0,
 };
-
-/** Moving away from where you are facing is slower than moving toward it. */
-const BACKPEDAL_FACTOR = 0.55;
 
 const ENDURANCE = {
   /** Units per second while sprinting. Full bar is 1. */
@@ -85,6 +83,16 @@ export class Player extends Entity {
 
     this.character = new Character(colors);
     this.object.add(this.character.root);
+
+    // At this camera angle a survivor standing behind their own house is simply
+    // not on the screen. See `entity/Marker.js`.
+    this.marker = new Marker();
+    this.object.add(this.marker.group);
+    // The body draws after its own silhouette, so the silhouette only ever
+    // tests against the world.
+    this.character.root.traverse((o) => {
+      if (o.isMesh) o.renderOrder = CHARACTER_ORDER;
+    });
 
     /** Body-part health, bleeding and infection. */
     this.body = new Body(this.profile);
@@ -148,16 +156,38 @@ export class Player extends Entity {
 
   // --- facing -----------------------------------------------------------
 
+  /**
+   * Facing.
+   *
+   * M3 made the body track the cursor at all times, so that you could back away
+   * from something while still looking at it. Played, that is not what it feels
+   * like: the pointer starts at the middle of the screen — which is *where the
+   * player is standing* — so a survivor who has not touched the mouse yet spins
+   * to face an arbitrary point a metre from their own feet, and walking around
+   * looks like being dragged sideways.
+   *
+   * So: **while you are moving, you face where you are going.** That is what a
+   * body does and it is what a player expects. Aiming still exists and still
+   * matters — standing still turns you toward the cursor, and a swing snaps to
+   * it — which keeps the one thing the original rule was for (choosing what to
+   * hit) without applying it to the ninety percent of the time you are walking.
+   */
   _face(intent, dt) {
-    if (this.hasAim) {
-      this.faceTo(this.aimTarget);
-    } else if (intent.move.lengthSq() > 1e-6) {
-      // Falling back to movement facing keeps the character sane before the
-      // pointer has ever moved.
+    if (intent.move.lengthSq() > 1e-6) {
       this.velocity.copy(intent.move);
       this.faceVelocity();
+    } else if (this.hasAim) {
+      this.faceTo(this.aimTarget);
     }
     this.stepTurn(dt);
+  }
+
+  /**
+   * Turn to the cursor immediately. Called just before a swing, so you hit what
+   * you clicked on rather than what you happened to be walking toward.
+   */
+  aimNow() {
+    if (this.hasAim) this.faceTo(this.aimTarget, true);
   }
 
   // --- movement ---------------------------------------------------------
@@ -181,12 +211,10 @@ export class Player extends Entity {
     if (this.moodles) speed *= this.moodles.mobility;
     speed *= this.profile.mod(MOD.WALK_SPEED);
 
-    // Backpedalling: scale by how much the move direction opposes the facing.
-    const forward = this.forward(this._delta);
-    const alignment = forward.dot(intent.move); // -1 backwards, 1 forwards
-    if (alignment < 0) {
-      speed *= BACKPEDAL_FACTOR + (1 - BACKPEDAL_FACTOR) * (1 + alignment);
-    }
+    // The backpedal penalty that used to live here went with M3's aim-facing:
+    // once the body turns toward travel, you are never moving backwards, so the
+    // multiplier could only ever fire during the fraction of a second the turn
+    // takes. It was charging for a state that no longer exists.
 
     this._delta.copy(intent.move).multiplyScalar(speed * dt);
     const hit = moveOnGrid(this.grid, this, this._delta.x, this._delta.z, true);
