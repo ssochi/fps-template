@@ -52,7 +52,34 @@ export class World {
     /** @type {Map<number, Mesh>} chunk key → mesh */
     this.meshes = new Map();
 
-    this.stats = { chunks: 0, triangles: 0, rebuilds: 0 };
+    this.stats = { chunks: 0, triangles: 0, rebuilds: 0, visible: 0 };
+
+    /**
+     * Highest storey currently drawn. Everything above it is hidden so the
+     * player can see the room they are standing in instead of its ceiling.
+     *
+     * This is the crude version — whole storeys, all at once. M4 refines it to
+     * per-room, which is what makes it feel like seeing into a house rather
+     * than taking the lid off the town.
+     */
+    this.levelCutoff = Infinity;
+  }
+
+  /** @param {number} level highest storey to draw; Infinity draws everything */
+  setLevelCutoff(level) {
+    if (level === this.levelCutoff) return;
+    this.levelCutoff = level;
+    this._applyCutoff();
+  }
+
+  _applyCutoff() {
+    let visible = 0;
+    for (const mesh of this.meshes.values()) {
+      const shown = mesh.userData.chunk.level <= this.levelCutoff;
+      mesh.visible = shown;
+      if (shown) visible++;
+    }
+    this.stats.visible = visible;
   }
 
   /**
@@ -77,6 +104,7 @@ export class World {
       done++;
     }
     this.stats.rebuilds += done;
+    this._applyCutoff();
     this.recount();
     return done;
   }

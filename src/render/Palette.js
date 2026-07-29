@@ -28,6 +28,7 @@ export const FLOOR_COLOR = {
   [FLOOR.CARPET]: linear(0x5c4a52),
   [FLOOR.TILE]: linear(0x7c7f82),
   [FLOOR.CONCRETE]: linear(0x62645f),
+  [FLOOR.ROOF]: linear(0x4a4348),
 };
 
 export const WALL_COLOR = {

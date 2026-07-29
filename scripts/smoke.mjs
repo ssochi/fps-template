@@ -26,6 +26,10 @@ const SHOTS = [
   { name: '03-close', rotation: 0, zoom: 0 },
   { name: '04-wide', rotation: 3, zoom: 5 },
   { name: '05-upstairs', rotation: 0, zoom: 2, level: 1 },
+  // Teleports the avatar inside a building, which is what drives the storey
+  // cutaway. Capturing it exercises the real code path rather than poking
+  // `setLevelCutoff` directly.
+  { name: '06-indoors', rotation: 0, zoom: 1, indoors: true },
 ];
 
 const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
@@ -75,16 +79,34 @@ try {
 
   for (const shot of SHOTS) {
     await page.evaluate((s) => {
-      const { isoCamera, avatar } = window.__knox;
+      const { isoCamera, avatar, town, world } = window.__knox;
       isoCamera.rotationStep = s.rotation;
       isoCamera.zoomStep = s.zoom;
       if (s.level !== undefined) {
         avatar.level = s.level;
         avatar.syncLevelHeight();
       }
+      if (s.indoors) {
+        // Step one tile in from a two-storey building's front door.
+        const b = town.buildings.find((x) => x.rect.storeys > 1) ?? town.buildings[0];
+        avatar.level = 0;
+        avatar.position.set(b.entrance.x + 0.5, 0, b.entrance.z + 1.5);
+        avatar.syncLevelHeight();
+        isoCamera.snapTo(avatar.position);
+        world.grid.__lastIndoor = b.entrance;
+      }
     }, shot);
     // Wait for the eased rotation/zoom to actually arrive before capturing.
     await page.waitForFunction(() => window.__knox.isoCamera.isSettled, { timeout: 5000 });
+    // The HUD only redraws every 15th frame, so a screenshot taken the instant
+    // the camera settles shows the *previous* shot's readout.
+    await page.evaluate(() => {
+      const start = window.__knox.loop.frame;
+      window.__knox.__hudTarget = start + 20;
+    });
+    await page.waitForFunction(() => window.__knox.loop.frame >= window.__knox.__hudTarget, {
+      timeout: 5000,
+    });
     await page.screenshot({ path: `${OUT}${shot.name}.png` });
     process.stdout.write(`  shot ${shot.name}\n`);
   }
@@ -95,12 +117,15 @@ try {
       calls: renderer.info.calls,
       triangles: renderer.info.triangles,
       chunks: world.stats.chunks,
+      buildings: window.__knox.town.buildings.length,
+      rooms: window.__knox.town.rooms.length,
       simMs: loop.lastUpdateMs,
     };
   });
   console.log(`\n  draw calls: ${stats.calls}   (one per chunk mesh + entities)`);
   console.log(`  triangles:  ${stats.triangles}`);
   console.log(`  chunks:     ${stats.chunks}`);
+  console.log(`  buildings:  ${stats.buildings}   rooms: ${stats.rooms}`);
   console.log(`  sim step:   ${stats.simMs.toFixed(3)} ms`);
 
   await browser.close();

@@ -70,6 +70,7 @@ export const FLOOR = {
   CARPET: 6,
   TILE: 7,
   CONCRETE: 8,
+  ROOF: 9,
 };
 
 export class TileGrid {

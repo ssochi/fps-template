@@ -21,7 +21,8 @@
  */
 import { BufferAttribute, BufferGeometry } from 'three';
 import { CHUNK, DIR, STOREY, TILE } from '../core/constants.js';
-import { FLAG, FLOOR, WALL } from './TileGrid.js';
+import { FLOOR, WALL } from './TileGrid.js';
+import { OBJ, objectColor, objectFacing, objectId, objectSpec } from './Objects.js';
 import { FLOOR_COLOR, WALL_COLOR } from '../render/Palette.js';
 
 /** How dark a fully occluded vertex gets. */
@@ -218,6 +219,10 @@ export function meshChunk(grid, cx, cz, level) {
       if (wn !== WALL.NONE) emitWall(b, wn, x, z, level, baseY, true);
       const ww = grid.wallW[i];
       if (ww !== WALL.NONE) emitWall(b, ww, x, z, level, baseY, false);
+
+      // --- objects ---
+      const packed = grid.object[i];
+      if (packed !== OBJ.NONE) emitObject(b, packed, x, z, level, baseY);
     }
   }
 
@@ -272,4 +277,139 @@ function emitWall(b, material, x, z, level, baseY, isNorth) {
   }
 }
 
-export { MeshBuilder, AO_MIN };
+/**
+ * Emit an object as a box, or as a stepped ramp for stairs.
+ *
+ * Boxes are drawn without a bottom face: every object rests on a floor, so the
+ * underside is never visible and is a fifth of the object budget.
+ */
+function emitObject(b, packed, x, z, level, baseY) {
+  const id = objectId(packed);
+  const spec = objectSpec(packed);
+  if (!spec) return;
+
+  if (id === OBJ.STAIRS_LOW || id === OBJ.STAIRS_HIGH) {
+    emitStairs(b, packed, x, z, level, baseY);
+    return;
+  }
+  if (id === OBJ.TREE) {
+    emitTree(b, x, z, level, baseY);
+    return;
+  }
+  if (id === OBJ.LAMPPOST) {
+    emitLamppost(b, x, z, level, baseY);
+    return;
+  }
+
+  const facing = objectFacing(packed);
+  // Facings 1 and 3 are quarter turns, so the footprint swaps axes.
+  const turned = facing === DIR.E || facing === DIR.W;
+  const w = turned ? spec.d : spec.w;
+  const d = turned ? spec.w : spec.d;
+
+  // Flush objects sit against the wall they face rather than tile-centred —
+  // a bed marooned in the middle of a bedroom is the tell-tale of naive
+  // furniture placement.
+  let cx = x + 0.5;
+  let cz = z + 0.5;
+  if (spec.flush) {
+    if (facing === DIR.N) cz = z + d / 2;
+    else if (facing === DIR.S) cz = z + 1 - d / 2;
+    else if (facing === DIR.W) cx = x + w / 2;
+    else cx = x + 1 - w / 2;
+  }
+
+  const y0 = baseY + (spec.y ?? 0);
+  const y1 = y0 + spec.h;
+  box(b, cx - w / 2, y0, cz - d / 2, cx + w / 2, y1, cz + d / 2, objectColor(id), level);
+}
+
+/** Stairs as four discrete steps, so they read as stairs at any zoom. */
+function emitStairs(b, packed, x, z, level, baseY) {
+  const id = objectId(packed);
+  const facing = objectFacing(packed);
+  const rgb = objectColor(id);
+  const steps = 4;
+  const low = id === OBJ.STAIRS_LOW;
+  const yBase = baseY + (low ? 0 : STOREY / 2);
+  const rise = STOREY / 2 / steps;
+
+  for (let s = 0; s < steps; s++) {
+    // Each step spans a slice of the tile along the direction of travel.
+    const t0 = s / steps;
+    const t1 = (s + 1) / steps;
+    const h = yBase + (s + 1) * rise;
+    let x0 = x;
+    let x1 = x + 1;
+    let z0 = z;
+    let z1 = z + 1;
+    if (facing === DIR.N) {
+      z0 = z + 1 - t1;
+      z1 = z + 1 - t0;
+    } else if (facing === DIR.S) {
+      z0 = z + t0;
+      z1 = z + t1;
+    } else if (facing === DIR.W) {
+      x0 = x + 1 - t1;
+      x1 = x + 1 - t0;
+    } else {
+      x0 = x + t0;
+      x1 = x + t1;
+    }
+    box(b, x0, baseY, z0, x1, h, z1, rgb, level);
+  }
+}
+
+/**
+ * A tree: trunk plus two stepped canopy blocks.
+ *
+ * A single box at tree height reads as a pillar, not a tree — and in an
+ * isometric view where trees are half the outdoor silhouette, that difference
+ * decides whether the town looks like a town. Two tapering canopy blocks are
+ * enough to read as foliage at every zoom on the ladder.
+ */
+function emitTree(b, x, z, level, baseY) {
+  const trunk = objectColor(OBJ.TREE).map((c) => c * 0.42);
+  const leafLow = objectColor(OBJ.TREE);
+  const leafHigh = leafLow.map((c) => c * 1.18);
+
+  const cx = x + 0.5;
+  const cz = z + 0.5;
+
+  box(b, cx - 0.13, baseY, cz - 0.13, cx + 0.13, baseY + 1.5, cz + 0.13, trunk, level);
+  box(b, cx - 0.62, baseY + 1.2, cz - 0.62, cx + 0.62, baseY + 2.9, cz + 0.62, leafLow, level);
+  box(b, cx - 0.4, baseY + 2.7, cz - 0.4, cx + 0.4, baseY + 4.0, cz + 0.4, leafHigh, level);
+}
+
+/** A lamppost: pole, arm and head, so it reads as a light and not a fence post. */
+function emitLamppost(b, x, z, level, baseY) {
+  const pole = objectColor(OBJ.LAMPPOST);
+  const head = [0.95, 0.88, 0.6];
+
+  const cx = x + 0.5;
+  const cz = z + 0.5;
+  box(b, cx - 0.08, baseY, cz - 0.08, cx + 0.08, baseY + 4.2, cz + 0.08, pole, level);
+  box(b, cx - 0.08, baseY + 4.0, cz - 0.08, cx + 0.55, baseY + 4.16, cz + 0.08, pole, level);
+  box(b, cx + 0.32, baseY + 3.78, cz - 0.14, cx + 0.6, baseY + 4.0, cz + 0.14, head, level);
+}
+
+/** An axis-aligned box with no bottom face. Winding verified by unit test. */
+function box(b, x0, y0, z0, x1, y1, z1, rgb, level) {
+  const flat = [1, 1, 1, 1];
+  const side = rgb.map((c) => c * 0.88);
+  const dark = rgb.map((c) => c * 0.76);
+  const top = rgb.map((c) => c * 1.06);
+
+  // top (+Y)
+  b.quad([x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0], top, flat, level);
+  // north (−Z)
+  b.quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], side, flat, level);
+  // south (+Z)
+  b.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], dark, flat, level);
+  // west (−X)
+  b.quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], dark, flat, level);
+  // east (+X)
+  b.quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], side, flat, level);
+}
+
+export { MeshBuilder, AO_MIN, box };

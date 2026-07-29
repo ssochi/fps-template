@@ -10,7 +10,8 @@ import { IsoCamera } from './render/IsoCamera.js';
 import { Loop } from './core/Loop.js';
 import { ACTION, Input } from './core/Input.js';
 import { World } from './world/World.js';
-import { buildTestBlock } from './scenes/TestBlock.js';
+import { FLAG } from './world/TileGrid.js';
+import { generateTown } from './worldgen/Town.js';
 import { Entity } from './entity/Entity.js';
 import { Walker } from './entity/Walker.js';
 import { STOREY, tileToWorld } from './core/constants.js';
@@ -22,8 +23,9 @@ const isoCamera = new IsoCamera({ aspect: window.innerWidth / window.innerHeight
 const renderer = new Renderer(canvas, isoCamera);
 const input = new Input(canvas);
 
-const world = new World(renderer.scene, 48, 32, 2);
-const { spawn } = buildTestBlock(world);
+const world = new World(renderer.scene, 104, 104, 3);
+const town = generateTown(world, 'knox-county');
+const { spawn } = town;
 
 // --- stand-in avatar ----------------------------------------------------
 // A capsule, not a character: M3 owns the real one. It exists so movement,
@@ -89,8 +91,14 @@ const loop = new Loop({
       walker.step(world.grid, moveDir, speed, dt);
     }
 
-    // A small budget keeps a collapsing building off the critical path. Nothing
-    // dirties chunks yet, but the path should be exercised from day one.
+    // Storey cutaway. Outdoors you see the town with its roofs on; step inside
+    // and everything above your head is hidden so you can see the room you are
+    // standing in. M4 refines this to per-room rather than per-storey.
+    const t = avatar.tile();
+    const indoors = world.grid.hasFlag(t.x, t.z, avatar.level, FLAG.INDOOR);
+    world.setLevelCutoff(indoors ? avatar.level : Infinity);
+
+    // A small budget keeps a collapsing building off the critical path.
     world.flushDirty(2);
   },
 
@@ -107,7 +115,7 @@ const loop = new Loop({
       const r = renderer.info;
       statsEl.textContent =
         `${loop.fps.toFixed(0)} fps   sim ${loop.lastUpdateMs.toFixed(2)}ms   draw ${loop.lastRenderMs.toFixed(2)}ms\n` +
-        `${r.calls} draws   ${(r.triangles / 1000).toFixed(1)}k tris   ${world.stats.chunks} chunks\n` +
+        `${r.calls} draws   ${(r.triangles / 1000).toFixed(1)}k tris   ${world.stats.visible}/${world.stats.chunks} chunks\n` +
         `tile ${Math.floor(avatar.position.x)},${Math.floor(avatar.position.z)}  storey ${avatar.level}` +
         `   zoom ${isoCamera.viewHeight}m${paused ? '   [PAUSED]' : ''}`;
     }
@@ -117,4 +125,4 @@ const loop = new Loop({
 loop.start();
 
 // Console handle, and the hook the smoke test drives.
-window.__knox = { world, renderer, isoCamera, loop, avatar, input };
+window.__knox = { world, town, renderer, isoCamera, loop, avatar, input };

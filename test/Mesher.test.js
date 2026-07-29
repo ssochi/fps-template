@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { FLOOR, TileGrid, WALL } from '../src/world/TileGrid.js';
 import { meshChunk, wallRects } from '../src/world/Mesher.js';
 import { DIR, STOREY } from '../src/core/constants.js';
+import { OBJ, objectFacing, objectId, packObject } from '../src/world/Objects.js';
 
 function gridWithFloor(w = 4, d = 4) {
   const g = new TileGrid(w, d, 1);
@@ -153,5 +154,68 @@ describe('ambient occlusion', () => {
     // The open floor is uniformly lit; the walled one has darker corners.
     expect(darkest(openColors)).toBeCloseTo(brightest(openColors), 5);
     expect(darkest(walledColors)).toBeLessThan(darkest(openColors));
+  });
+});
+
+describe('object geometry', () => {
+  it('emits a box with five faces — no wasted underside', () => {
+    const g = new TileGrid(4, 4, 1);
+    g.setObject(1, 1, 0, packObject(OBJ.CRATE, DIR.N));
+    const { geometry, triangles } = meshChunk(g, 0, 0, 0);
+    expect(triangles).toBe(10); // five quads
+    // Every face except the bottom: no normal may point down.
+    expect(normalsOf(geometry).has('0,-1,0')).toBe(false);
+    expect(normalsOf(geometry).has('0,1,0')).toBe(true);
+  });
+
+  it('round-trips an object id and facing through the packed cell value', () => {
+    for (const id of [OBJ.BED, OBJ.FRIDGE, OBJ.STAIRS_LOW]) {
+      for (let dir = 0; dir < 4; dir++) {
+        const packed = packObject(id, dir);
+        expect(objectId(packed)).toBe(id);
+        expect(objectFacing(packed)).toBe(dir);
+      }
+    }
+  });
+
+  it('keeps an object inside its own tile', () => {
+    const g = new TileGrid(4, 4, 1);
+    g.setObject(2, 1, 0, packObject(OBJ.WARDROBE, DIR.N));
+    const pos = meshChunk(g, 0, 0, 0).geometry.getAttribute('position');
+    for (let i = 0; i < pos.count; i++) {
+      expect(pos.getX(i)).toBeGreaterThanOrEqual(2);
+      expect(pos.getX(i)).toBeLessThanOrEqual(3);
+      expect(pos.getZ(i)).toBeGreaterThanOrEqual(1);
+      expect(pos.getZ(i)).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it('rotates a non-square footprint with its facing', () => {
+    const extent = (facing, axis) => {
+      const g = new TileGrid(4, 4, 1);
+      g.setObject(1, 1, 0, packObject(OBJ.SOFA, facing));
+      const pos = meshChunk(g, 0, 0, 0).geometry.getAttribute('position');
+      let min = Infinity;
+      let max = -Infinity;
+      for (let i = 0; i < pos.count; i++) {
+        const v = axis === 'x' ? pos.getX(i) : pos.getZ(i);
+        min = Math.min(min, v);
+        max = Math.max(max, v);
+      }
+      return max - min;
+    };
+    // A sofa is wider than it is deep; turning it must swap those extents.
+    expect(extent(DIR.N, 'x')).toBeCloseTo(extent(DIR.E, 'z'), 5);
+    expect(extent(DIR.N, 'z')).toBeCloseTo(extent(DIR.E, 'x'), 5);
+  });
+
+  it('builds stairs that climb a full storey across two tiles', () => {
+    const g = new TileGrid(4, 4, 2);
+    g.setObject(1, 1, 0, packObject(OBJ.STAIRS_LOW, DIR.E));
+    g.setObject(2, 1, 0, packObject(OBJ.STAIRS_HIGH, DIR.E));
+    const pos = meshChunk(g, 0, 0, 0).geometry.getAttribute('position');
+    let maxY = -Infinity;
+    for (let i = 0; i < pos.count; i++) maxY = Math.max(maxY, pos.getY(i));
+    expect(maxY).toBeCloseTo(STOREY);
   });
 });
