@@ -14,6 +14,7 @@ import {
   DirectionalLight,
   PCFShadowMap,
   Scene,
+  Vector2,
   Vector3,
   WebGLRenderer,
 } from 'three';
@@ -82,6 +83,7 @@ export class Renderer {
      * deliberately short-ranged — it shows you the room you are in, not the
      * street, so carrying one changes *where* you can see rather than how far.
      */
+    this._bufferSize = new Vector2(1, 1);
     this.torch = new PointLight(0xffd9a0, 0, 9, 1.6);
     this.torch.castShadow = false; // a second shadow map for one lamp is not worth it
     this.scene.add(this.torch);
@@ -133,6 +135,17 @@ export class Renderer {
     this.fill.intensity = MOOD.fillIntensity * (0.46 + dayness * 0.54);
     this.fill.color.setHex(dayness > 0.35 ? MOOD.fillSky : MOOD.fillNight);
     this.scene.background.setHex(dayness > 0.35 ? MOOD.sky : MOOD.skyNight);
+  }
+
+  /**
+   * Drawing-buffer size in pixels, which is what `gl_FragCoord` is measured in.
+   * Not the CSS size: on a high-density display the two differ by the pixel
+   * ratio, and a screen-space shader test that uses the wrong one is wrong by
+   * exactly that factor.
+   */
+  get bufferSize() {
+    this.renderer.getDrawingBufferSize(this._bufferSize);
+    return this._bufferSize;
   }
 
   /**

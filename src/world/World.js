@@ -6,7 +6,7 @@
  * meshes — never the other way round. That one-way flow is what keeps
  * construction, destruction and worldgen from each needing their own renderer.
  */
-import { Group, Mesh } from 'three';
+import { Group, Mesh, Vector3 } from 'three';
 import { TileGrid } from './TileGrid.js';
 import { meshChunk } from './Mesher.js';
 import { CHUNK } from '../core/constants.js';
@@ -17,6 +17,20 @@ import {
   createWorldMaterial,
   createWorldUniforms,
 } from '../render/WorldMaterial.js';
+
+/** Where on the body the cutaway circle is centred, in metres off the floor. */
+const OCCLUDE_EYE = 0.95;
+
+/**
+ * The cutaway hole, in metres.
+ *
+ * Wide enough to show the survivor and a little of what is beside them —
+ * narrow enough that it reads as a window onto a person rather than as the
+ * building having been demolished.
+ */
+const OCCLUDE_RADIUS = { inner: 1.5, outer: 2.6 };
+
+const _occludePoint = new Vector3();
 
 export class World {
   /**
@@ -73,6 +87,38 @@ export class World {
     this.uniforms.uPlayerLevel.value = observer.level;
     this.fog.update(observer.x, observer.z, observer.level);
     this.stats.visible = this.fog.stats.visible;
+  }
+
+  /**
+   * Point the occlusion cutaway at the player.
+   *
+   * The radius is stated in **metres** and converted to pixels here, so the
+   * hole is the same size in the world at every zoom step rather than the same
+   * size on the screen. A fixed pixel radius would swallow a whole house at the
+   * closest zoom and be smaller than the character at the widest.
+   *
+   * @param {import('three').Vector3} worldPosition the player's feet
+   * @param {import('../render/IsoCamera.js').IsoCamera} isoCamera
+   * @param {{ width: number, height: number }} buffer drawing-buffer size in pixels
+   */
+  updateOcclusion(worldPosition, isoCamera, buffer) {
+    const u = this.uniforms;
+    // Chest height: projecting the feet would put the circle's centre at the
+    // bottom of the character and leave their head covered.
+    _occludePoint.set(worldPosition.x, worldPosition.y + OCCLUDE_EYE, worldPosition.z);
+    _occludePoint.project(isoCamera.camera);
+
+    u.uPlayerScreen.value.set(
+      (_occludePoint.x * 0.5 + 0.5) * buffer.width,
+      (_occludePoint.y * 0.5 + 0.5) * buffer.height,
+      _occludePoint.z * 0.5 + 0.5,
+    );
+
+    const pixelsPerMetre = buffer.height / isoCamera.viewHeight;
+    u.uOccludeRadius.value.set(
+      OCCLUDE_RADIUS.inner * pixelsPerMetre,
+      OCCLUDE_RADIUS.outer * pixelsPerMetre,
+    );
   }
 
   /**

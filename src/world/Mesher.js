@@ -22,7 +22,7 @@
 import { BufferAttribute, BufferGeometry } from 'three';
 import { CHUNK, DIR, STOREY, TILE } from '../core/constants.js';
 import { FLOOR, WALL } from './TileGrid.js';
-import { FACING_NONE } from '../render/WorldMaterial.js';
+import { FACING_FLOOR, FACING_NONE } from '../render/WorldMaterial.js';
 import { OBJ, objectColor, objectFacing, objectId, objectSpec } from './Objects.js';
 import { FLOOR_COLOR, WALL_COLOR } from '../render/Palette.js';
 
@@ -220,7 +220,10 @@ export function meshChunk(grid, cx, cz, level) {
           rgb,
           ao,
           level,
-          FACING_NONE,
+          // Tagged as floor, not merely "not a wall": M15's occlusion cutaway
+          // dissolves what is in front of the player, and the ground under
+          // their feet must survive that.
+          FACING_FLOOR,
           grid.room[i],
         );
       }

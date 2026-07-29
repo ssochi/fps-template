@@ -326,6 +326,9 @@ export function createGame({
       observer.z = t.z;
       observer.level = avatar.level;
       world.updateView(dt, observer, isoCamera);
+      // Nothing may cover the player. Driven from here rather than from
+      // `updateView` because it needs their world position, not their tile.
+      world.updateOcclusion(avatar.position, isoCamera, renderer.bufferSize);
       horde.update(dt, observer);
       combat.update(dt);
       construction.update(dt);

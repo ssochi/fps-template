@@ -148,7 +148,8 @@ Every consumer is a query against it:
 | System | Query |
 | --- | --- |
 | Mesher | walls, floors, objects, per-vertex room *behind* each face |
-| Cutaway | `aRoom` + facing mask |
+| Cutaway | `aRoom` + facing mask (the room you are *in*) |
+| Occlusion cutaway | screen-space circle on the player (what you are *behind*) |
 | Sight | `blocksSight`, DDA from the observer |
 | Sound | attenuated flood fill |
 | FlowField | `canWalk` — geometric; a shut door is still a route |
@@ -199,12 +200,12 @@ answer.
 | M12 | **Character creation & the main menu** | Why is *this run* different from the last? |
 | M13 | **The horde that moves** | Why does the neighbourhood I cleared stop being safe? |
 | M14 | **Playable** | Can somebody who has never seen this play it? |
-| M15 | **Metagame events & the shutoff clock** | Why does the world get harder on its own? |
-| M16 | **Water, fire and food** | What do I do when the taps run dry? |
-| M17 | **Full carpentry** | Why is this building *mine*? |
-| M18 | **The world beyond houses** | Why walk two streets further? |
-| M19 | **Vehicles** | Why is a supply run a different activity from a loot run? |
-| M20 | **Farming, foraging and animals** | What do I eat in month two? |
+| M15 | **X-ray** | Can they see themselves? |
+| M16 | **Metagame events & the shutoff clock** | Why does the world get harder on its own? |
+| M17 | **Water, fire and food** | What do I do when the taps run dry? |
+| M18 | **Full carpentry** | Why is this building *mine*? |
+| M19 | **The world beyond houses** | Why walk two streets further? |
+| M20 | **Vehicles** | Why is a supply run a different activity from a loot run? |
 | M21 | **Streaming & scale** | Why is the map bigger than a neighbourhood? *closes cycle 2* |
 
 **Amendment (M14).** M14 was not on this plan. A playtest reported six things —

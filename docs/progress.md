@@ -35,16 +35,17 @@ reasoning in [`blueprint.md` §8](./blueprint.md).
 | M12 | Character creation & the main menu | ✅ Complete | 5 | 326 tests; 25 traits / 9 occupations, autosave, `main.js` 411 → 52 lines |
 | M13 | The horde that moves | ✅ Complete | 6 | 357 tests; bounded 3D flow field — **flat 0.75 ms at any map size**; stairs; migration |
 | M14 | **Playable** | ✅ Complete | 4 | 380 tests; 中文 UI, controls screen, a marker you can find, facing follows travel, 260 → 90 zombies |
-| M15 | Metagame events & the shutoff clock | 🟡 Next | — | The helicopter; water and power failing on a schedule. *Was M14; deferred by playtest feedback* |
-| M16 | Water, fire and food | ⬜ Planned | — | Rain collectors, campfires, cooking, generators |
-| M17 | Full carpentry | ⬜ Planned | — | Placeable furniture and storage, built walls, barricade repair |
-| M18 | The world beyond houses | ⬜ Planned | — | Shops, warehouse, fuel station; loot tables per archetype |
-| M19 | Vehicles | ⬜ Planned | — | Keys, hotwiring, fuel, parts, mobile storage |
-| M20 | Farming, foraging and animals | ⬜ Planned | — | The month-two food answer |
+| M15 | **X-ray** | ✅ Complete | 1 | 389 tests; screen-space occlusion cutaway — walls, roofs and furniture between the camera and you dissolve |
+| M16 | Metagame events & the shutoff clock | 🟡 Next | — | The helicopter; water and power failing on a schedule. *Written and parked since M14* |
+| M17 | Water, fire and food | ⬜ Planned | — | Rain collectors, campfires, cooking, generators |
+| M18 | Full carpentry | ⬜ Planned | — | Placeable furniture and storage, built walls, barricade repair |
+| M19 | The world beyond houses | ⬜ Planned | — | Shops, warehouse, fuel station; loot tables per archetype |
+| M20 | Vehicles | ⬜ Planned | — | Keys, hotwiring, fuel, parts, mobile storage |
 | M21 | Streaming & scale | ⬜ Planned | — | 300² map, chunked simulation, mesh streaming — **closes cycle 2** |
 
-**M22 opens cycle 3** as a fresh Exploration milestone. Meta-progression and
-polish — save slots, sandbox settings — folded into M14's work and M21.
+**M22 opens cycle 3** as a fresh Exploration milestone. Two planned milestones
+were displaced by playtest feedback (M14 and M15) and two were folded into other
+work; farming and meta-progression move into cycle 3.
 
 ## Notes on the process
 
@@ -55,6 +56,10 @@ polish — save slots, sandbox settings — folded into M14's work and M21.
   7 → 4 as milestones shifted from building systems to connecting them. M16–M20
   build new systems; if they land in three passes, suspect the verification
   rather than celebrate the velocity.
+- **A correct system can solve half a problem for fourteen milestones.** M4's
+  cutaway opens the building you are *inside*; nothing ever opened the building
+  you are standing *behind*, and its doc reads as complete because the half it
+  built is right. Both M14 and M15 came from someone playing, not from the plan.
 - **Review at least one screenshot as a player, not as a renderer.** M14 was an
   unplanned milestone built entirely from six lines of playtest feedback, and
   five of the six complaints were visible in `01-default.png` — a frame that had

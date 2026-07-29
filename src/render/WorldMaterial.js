@@ -27,10 +27,21 @@
  * position. Three states are read out of one value: black when unseen, a cool
  * desaturated memory when remembered, full colour when visible.
  */
-import { Color, FrontSide, MeshDepthMaterial, MeshLambertMaterial, RGBADepthPacking, Vector2, Vector4 } from 'three';
+import { Color, FrontSide, MeshDepthMaterial, MeshLambertMaterial, RGBADepthPacking, Vector2, Vector3, Vector4 } from 'three';
 
 /** Facing id used by anything that must never be cut for facing the camera. */
 export const FACING_NONE = 4;
+
+/**
+ * Floors and the ground.
+ *
+ * Distinguished from `FACING_NONE` only so the M15 occlusion cutaway can leave
+ * them alone: dissolving a wall in front of the player reveals the room, and
+ * dissolving the *ground* in front of the player reveals the void. A floor on a
+ * storey *above* the player is a different thing — that is a ceiling, and it
+ * goes — so the exemption is conditioned on level, not on the flag alone.
+ */
+export const FACING_FLOOR = 5;
 
 /**
  * A 4×4 ordered dither. Declared once and shared by both the beauty and depth
@@ -66,6 +77,7 @@ uniform vec4  uFacingHidden;
 varying float vCut;
 varying vec3  vWorldPos;
 varying float vLevelOut;
+varying float vOccludable;
 
 float knoxCutAmount() {
   float roomCut = texture2D( uRoomCut, vec2( ( aRoom + 0.5 ) / uRoomCutSize, 0.5 ) ).r;
@@ -89,6 +101,9 @@ const CUT_VERTEX = /* glsl */ `
   vCut = knoxCutAmount();
   vWorldPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
   vLevelOut = aLevel;
+  // Ground the player is standing on, or below them, is never dissolved by the
+  // occlusion cutaway — see FACING_FLOOR. A floor above them is a ceiling.
+  vOccludable = ( aFacing > 4.5 && aLevel < uPlayerLevel + 0.5 ) ? 0.0 : 1.0;
 `;
 
 const FOG_PARS_FRAGMENT = /* glsl */ `
@@ -101,6 +116,41 @@ uniform float uFogStrength;
 varying float vCut;
 varying vec3  vWorldPos;
 varying float vLevelOut;
+varying float vOccludable;
+`;
+
+/**
+ * The occlusion cutaway — "nothing may cover the player".
+ *
+ * The reference game's defining rendering rule, and the one M4's per-room
+ * cutaway does not cover: room cutaway opens the building you are *inside*, and
+ * says nothing about a building you are merely standing *behind*. On the very
+ * first frame of a new game the spawn is beside a house, the house is between
+ * the survivor and the lens, and the screen shows a town with nobody in it.
+ *
+ * The test is in **screen space**, which is the exact statement of the problem:
+ * a fragment is dissolved when it is (a) nearer the camera than the player and
+ * (b) within a short distance of the player *on screen*. Doing it in world
+ * space instead means picking a cylinder radius that is wrong at some zoom, and
+ * fighting the ground plane, which at a 31 degree pitch is always "in front of"
+ * the player somewhere.
+ *
+ * The radius is given in pixels but computed from a world-space size, so the
+ * hole is the same number of *metres* across at every zoom step.
+ */
+const OCCLUDE_PARS = /* glsl */ `
+uniform vec3  uPlayerScreen;   // xy in drawing-buffer pixels, z in NDC depth
+uniform vec2  uOccludeRadius;  // inner (fully cut), outer (fully kept)
+uniform float uOccludeStrength;
+
+float knoxOcclusionCut() {
+  if ( uOccludeStrength < 0.001 || vOccludable < 0.5 ) return 0.0;
+  // Only things in front of the player. The bias keeps the surface the player
+  // is standing on, and anything level with them, out of it.
+  if ( gl_FragCoord.z >= uPlayerScreen.z - 0.00002 ) return 0.0;
+  float d = length( gl_FragCoord.xy - uPlayerScreen.xy );
+  return uOccludeStrength * ( 1.0 - smoothstep( uOccludeRadius.x, uOccludeRadius.y, d ) );
+}
 `;
 
 /** Applied just before the fragment is written, so it sees the final colour. */
@@ -126,6 +176,22 @@ const FOG_FRAGMENT = /* glsl */ `
 `;
 
 const CUT_DISCARD = /* glsl */ `
+  {
+    float knoxCut = max( vCut, knoxOcclusionCut() );
+    if ( knoxCut > 0.001 && knoxCut > knoxDither( gl_FragCoord.xy ) ) discard;
+  }
+`;
+
+/**
+ * The depth pass gets the room cutaway but *not* the occlusion cutaway.
+ *
+ * The room cutaway must be in both, or a removed roof leaves its shadow lying
+ * across the room it just revealed. The occlusion cutaway must not: its test is
+ * in camera screen space, which is meaningless while rendering from the light,
+ * and a wall dissolved so you can see yourself should still shade the street —
+ * otherwise a hole of sunlight follows you around the town.
+ */
+const CUT_DISCARD_DEPTH = /* glsl */ `
   if ( vCut > 0.001 && vCut > knoxDither( gl_FragCoord.xy ) ) discard;
 `;
 
@@ -145,6 +211,9 @@ export function createWorldUniforms({ visibilityTexture, visWidth, visHeight, gr
     uGridDepth: { value: gridDepth },
     uMemoryTint: { value: new Color(0.42, 0.47, 0.62) },
     uFogStrength: { value: 1 },
+    uPlayerScreen: { value: new Vector3(0, 0, 1) },
+    uOccludeRadius: { value: new Vector2(40, 64) },
+    uOccludeStrength: { value: 1 },
   };
 }
 
@@ -165,11 +234,14 @@ export function createWorldMaterial(uniforms) {
       .replace('#include <fog_vertex>', `#include <fog_vertex>\n${CUT_VERTEX}`);
 
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${FOG_PARS_FRAGMENT}\n${DITHER_GLSL}`)
+      .replace(
+        '#include <common>',
+        `#include <common>\n${FOG_PARS_FRAGMENT}\n${OCCLUDE_PARS}\n${DITHER_GLSL}`,
+      )
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n${CUT_DISCARD}`)
       .replace('#include <opaque_fragment>', `${FOG_FRAGMENT}\n#include <opaque_fragment>`);
   };
-  material.customProgramCacheKey = () => 'knox-world-v1';
+  material.customProgramCacheKey = () => 'knox-world-v2';
   return material;
 }
 
@@ -193,8 +265,11 @@ export function createWorldDepthMaterial(uniforms) {
 
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FOG_PARS_FRAGMENT}\n${DITHER_GLSL}`)
-      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n${CUT_DISCARD}`);
+      .replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>\n${CUT_DISCARD_DEPTH}`,
+      );
   };
-  material.customProgramCacheKey = () => 'knox-world-depth-v1';
+  material.customProgramCacheKey = () => 'knox-world-depth-v2';
   return material;
 }
