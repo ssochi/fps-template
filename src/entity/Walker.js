@@ -10,7 +10,6 @@
  * cleanly instead of squeezing through the gap between two wall planes — the
  * classic failure mode of testing the destination point alone.
  */
-import { Vector3 } from 'three';
 import { worldToTile } from '../core/constants.js';
 
 const _from = { x: 0, z: 0 };
@@ -72,41 +71,4 @@ export function moveOnGrid(grid, entity, dx, dz, respectDoors = false) {
   }
 
   return { hitX, hitZ, blockedDoor };
-}
-
-/**
- * A stand-in mover for M1: screen-relative input, grid collision, no animation.
- * M3 replaces this with a real controller (stamina, sneak, encumbrance).
- */
-export class Walker {
-  /** @param {import('./Entity.js').Entity} entity */
-  constructor(entity) {
-    this.entity = entity;
-    /** Metres per second. */
-    this.walkSpeed = 2.6;
-    this.runSpeed = 5.2;
-    this.sneakSpeed = 1.3;
-    this._delta = new Vector3();
-  }
-
-  /**
-   * @param {import('../world/TileGrid.js').TileGrid} grid
-   * @param {Vector3} moveDir world-space unit direction (or zero)
-   * @param {number} speed metres per second
-   * @param {number} dt
-   */
-  step(grid, moveDir, speed, dt) {
-    const e = this.entity;
-    if (moveDir.lengthSq() > 1e-8) {
-      this._delta.copy(moveDir).multiplyScalar(speed * dt);
-      const hit = moveOnGrid(grid, e, this._delta.x, this._delta.z);
-      e.velocity.copy(moveDir).multiplyScalar(speed);
-      e.faceVelocity();
-      e.stepTurn(dt);
-      return hit;
-    }
-    e.velocity.set(0, 0, 0);
-    e.stepTurn(dt);
-    return { hitX: false, hitZ: false };
-  }
 }

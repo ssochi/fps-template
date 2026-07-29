@@ -26,5 +26,10 @@ Development runs as a **milestone loop**:
 
 ## Current cycle
 
-Cycle 1 — M0 … M10. **Complete.** M11 opens cycle 2 with a fresh Exploration
-milestone.
+**Cycle 2 — M11 … M21.** Opened by [M11's
+survey](./milestones/M11-exploration.md), which published
+[blueprint v2](./blueprint.md).
+
+Cycle 1 (M0 … M10) is complete: it shipped a game you can lose. Cycle 2 answers
+the question that survey asked — *why is day 20 different from day 3?* — with a
+world that runs down on a clock and a horde that keeps arriving.

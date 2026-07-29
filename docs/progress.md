@@ -1,6 +1,9 @@
 # Progress ledger
 
-Cycle 1 (M0 – M10). An Exploration milestone opens each cycle.
+An Exploration milestone opens each cycle: it re-surveys the code, measures where
+it breaks, reads what the reference game does, and rewrites the blueprint.
+
+## Cycle 1 — M0 to M10 ✅
 
 | # | Milestone | Status | Passes | Notes |
 | --- | --- | --- | --- | --- |
@@ -16,11 +19,38 @@ Cycle 1 (M0 – M10). An Exploration milestone opens each cycle.
 | M9 | Crafting & base building | ✅ Complete | 4 | 262 tests; destructible barricades, torch, recipes |
 | M10 | Progression & polish | ✅ Complete | 4 | 286 tests; skills, audio, saving — **closes cycle 1** |
 
-**Cycle 1 complete.** Cycle 2 opens at M11 with a fresh Exploration milestone,
-which re-surveys the code and rewrites the blueprint. It should start from the
-carried-forward gaps at the end of
-[`milestones/M10-progression-polish.md`](./milestones/M10-progression-polish.md).
+**Cycle 1 shipped a complete short loop:** you go out because you are thirsty,
+you search a house because that is where water is, you are heard, you fight or
+you run, and eventually one of those goes wrong.
 
-| # | Milestone | Status |
-| --- | --- | --- |
-| M11 | Exploration (opens cycle 2) | 🟡 Next |
+## Cycle 2 — M11 to M21
+
+Thesis, from [M11's survey](./milestones/M11-exploration.md): *cycle 1 has no
+answer to why day 20 is different from day 3.* Cycle 2 is ten answers. Full
+reasoning in [`blueprint.md` §8](./blueprint.md).
+
+| # | Milestone | Status | Passes | Notes |
+| --- | --- | --- | --- | --- |
+| M11 | Exploration (opens cycle 2) | ✅ Complete | 1 | Blueprint **v2** published; flow-field scaling wall identified; dead `Walker` class removed |
+| M12 | Character creation & the main menu | 🟡 Next | — | Traits, occupations, the unused `Skills.rate` hook, and the menu save/load has been waiting for |
+| M13 | The horde that moves | ⬜ Planned | — | Two-field pathing (fine radius + coarse map), stair edges, migration. The architectural item |
+| M14 | Metagame events & the shutoff clock | ⬜ Planned | — | The helicopter; water and power failing on a schedule |
+| M15 | Water, fire and food | ⬜ Planned | — | Rain collectors, campfires, cooking, generators |
+| M16 | Full carpentry | ⬜ Planned | — | Placeable furniture and storage, built walls, barricade repair |
+| M17 | The world beyond houses | ⬜ Planned | — | Shops, warehouse, fuel station; loot tables per archetype |
+| M18 | Vehicles | ⬜ Planned | — | Keys, hotwiring, fuel, parts, mobile storage |
+| M19 | Farming, foraging and animals | ⬜ Planned | — | The month-two food answer |
+| M20 | Streaming & scale | ⬜ Planned | — | 300² map, chunked simulation, mesh streaming |
+| M21 | Meta-progression & polish | ⬜ Planned | — | Autosave, save slots, sandbox settings — **closes cycle 2** |
+
+**M22 opens cycle 3** as a fresh Exploration milestone.
+
+## Notes on the process
+
+- **The *Known gaps* section at the end of each milestone doc is the real
+  backlog.** It is specific, it accumulates, and M9, M10 and M11 all worked from
+  it rather than from the blueprint. The blueprint is kept short for that reason.
+- **Pass counts are recorded because they are diagnostic.** Cycle 1 trended
+  7 → 4 as milestones shifted from building systems to connecting them. M16–M20
+  build new systems; if they land in three passes, suspect the verification
+  rather than celebrate the velocity.
