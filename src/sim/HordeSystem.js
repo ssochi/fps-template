@@ -23,7 +23,7 @@ import { STOREY } from '../core/constants.js';
 import { events } from '../core/Events.js';
 
 /** Frames baked per clip. Short loops; the shader interpolates between rows. */
-const CLIP_FRAMES = { shamble: 24, lunge: 18, idle: 16 };
+const CLIP_FRAMES = { shamble: 24, lunge: 18, idle: 16, attack: 14, fall: 18 };
 
 /** How far the player must move before the flow field is rebuilt, in tiles. */
 const REBUILD_DISTANCE = 3;
@@ -73,6 +73,40 @@ export const ZOMBIE_CLIPS = [
       // a room never reads as a set of statues.
       c.applyPose(phase, 'shamble', 0.12);
       c.applyUndeadArms(0.12, phase * 0.5);
+    },
+  },
+  {
+    // Plays once. The reach peaks partway through rather than at the end, so
+    // the moment the blow lands is visible and backing off during the windup
+    // reads as having dodged something.
+    name: 'attack',
+    frames: CLIP_FRAMES.attack,
+    pose: (c, t) => {
+      const strike = Math.sin(Math.min(1, t * 1.5) * Math.PI);
+      c.applyPose(0, 'shamble', 0.1);
+      c.applyUndeadArms(0.55 + strike * 0.45, 0);
+      c.hips.rotation.x = 0.1 + strike * 0.22;
+      c.torso.rotation.y = strike * 0.18;
+    },
+  },
+  {
+    // Plays once and holds: a corpse stays down, so a street you cleared stays
+    // visibly cleared. Collapse, not ragdoll — the rig has no physics and a
+    // hand-shaped fall reads better than a wrong one.
+    name: 'fall',
+    frames: CLIP_FRAMES.fall,
+    pose: (c, t) => {
+      const e = t * t * (3 - 2 * t); // ease, so the drop accelerates
+      c.applyPose(0, 'shamble', 0.06);
+      c.applyUndeadArms(0.3 * (1 - e), 0);
+      // Fold at the hips and sink, ending face down at floor level.
+      c.hips.rotation.x = 0.12 + e * (Math.PI / 2 - 0.12);
+      c.hips.position.y = 0.92 - e * 0.78;
+      c.legL.rotation.x = -e * 0.5;
+      c.legR.rotation.x = -e * 0.35;
+      c.shinL.rotation.x = e * 0.6;
+      c.shinR.rotation.x = e * 0.45;
+      c.head.rotation.x = -e * 0.5;
     },
   },
 ];

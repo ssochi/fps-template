@@ -23,6 +23,8 @@ import { moveOnGrid } from './Walker.js';
 import { DIR_VEC, STOREY, worldToTile } from '../core/constants.js';
 import { OBJ, objectId } from '../world/Objects.js';
 import { events } from '../core/Events.js';
+import { Body } from '../sim/Body.js';
+import { WeaponInstance } from '../items/Weapons.js';
 
 const SPEED = {
   sneak: 1.15,
@@ -57,6 +59,11 @@ export class Player extends Entity {
 
     this.character = new Character(colors);
     this.object.add(this.character.root);
+
+    /** Body-part health, bleeding and infection. */
+    this.body = new Body();
+    /** What is in your hands. M8 makes this swappable from an inventory. */
+    this.weapon = new WeaponInstance('crowbar');
 
     /** 0–1. Depletes when sprinting, recovers slowly. */
     this.endurance = 1;
@@ -132,7 +139,9 @@ export class Player extends Entity {
     let mode = intent.sneak ? 'sneak' : intent.run ? 'run' : 'walk';
     if (mode === 'run' && (this.winded || this.endurance <= 0)) mode = 'walk';
 
-    let speed = SPEED[mode];
+    // A wounded or broken leg is the injury the player feels most, because it
+    // decides whether running away is still an option.
+    let speed = SPEED[mode] * this.body.mobility;
 
     // Backpedalling: scale by how much the move direction opposes the facing.
     const forward = this.forward(this._delta);
@@ -152,7 +161,7 @@ export class Player extends Entity {
     }
 
     // Actual speed, which may be less than intended if we scraped a wall.
-    this.currentSpeed = (hit.hitX && hit.hitZ) ? 0 : speed;
+    this.currentSpeed = hit.hitX && hit.hitZ ? 0 : speed;
     this.gait = this.currentSpeed > 0 ? mode : 'idle';
     this._drainEndurance(dt, this.gait);
 

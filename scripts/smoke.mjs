@@ -38,6 +38,10 @@ const SHOTS = [
   // Fog of war gets its own shot. Every other shot reveals the map first, so
   // that geometry and cutaway regressions are not masked by darkness.
   { name: '09-fog-of-war', rotation: 0, zoom: 3, fog: true },
+  // Stages a fight: a ring of zombies around the player, half of them killed.
+  // Verifies the fall clip holds its last frame — a corpse that stood back up
+  // would mean the non-looping clip path is broken.
+  { name: '10-combat', rotation: 0, zoom: 0, fight: true },
 ];
 
 const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
@@ -86,7 +90,7 @@ try {
   await page.waitForFunction(() => window.__knox && window.__knox.loop.frame > 20, { timeout: 20000 });
 
   for (const shot of SHOTS) {
-    await page.evaluate((s) => {
+    const setupResult = await page.evaluate((s) => {
       const { isoCamera, avatar, town, world } = window.__knox;
       isoCamera.rotationStep = s.rotation;
       isoCamera.zoomStep = s.zoom;
@@ -128,6 +132,72 @@ try {
       } else {
         window.__knox.__forceGait = null;
       }
+      if (s.fight) {
+        const { horde: hs, avatar: av } = window.__knox;
+        const h = hs.horde;
+        const cx = window.__knox.town.roads.vertical[1];
+        const cz = window.__knox.town.roads.horizontal[1];
+        av.level = 0;
+        av.position.set(cx + 0.5, 0, cz + 6.5);
+        av.syncLevelHeight();
+        av.hasAim = false;
+        av.setYaw(Math.PI * 0.75);
+        isoCamera.snapTo(av.position);
+
+        // Ring the player with zombies, then actually swing at them so the
+        // kills come through the real combat path rather than being staged.
+        const ring = [];
+        for (let i = 0; i < h.count && ring.length < 9; i++) ring.push(i);
+        ring.forEach((i, k) => {
+          const a = (k / ring.length) * Math.PI * 2;
+          // Inside the crowbar's 1.35 m reach. Staged any further out and every
+          // swing correctly misses, which looks exactly like combat being broken.
+          h.x[i] = av.position.x + Math.cos(a) * 1.05;
+          h.z[i] = av.position.z + Math.sin(a) * 1.05;
+          h.level[i] = 0;
+          h.yaw[i] = Math.atan2(-Math.cos(a), -Math.sin(a)) + Math.PI;
+          h.state[i] = 3; // CHASE
+          h.busy[i] = 0;
+          h.cooldown[i] = 0;
+          h.health[i] = 100;
+        });
+
+        // Revive first. By this shot the player has spent the whole run standing
+        // in a crowd and is usually dead — and a dead player's swings are
+        // correctly refused, which looks exactly like combat being broken.
+        av.body.health.fill(100);
+        av.body.bleed.fill(0);
+        av.body.fractured.fill(0);
+        av.body.pain = 0;
+        av.body.alive = true;
+        av.body.causeOfDeath = null;
+
+        // Swing until several are down, so the fall clip is exercised for real.
+        av.endurance = 1;
+        for (let s2 = 0; s2 < 14; s2++) {
+          av.busy = 0;
+          av.endurance = 1;
+          window.__knox.combat.swing('attack');
+          h.clock += 0.4;
+        }
+        // Let the corpses finish falling, and push the survivors back out of
+        // reach. Being surrounded by nine is correctly fatal, and a dead player
+        // is not what this shot is meant to show.
+        ring.forEach((i, k) => {
+          if (h.state[i] === 4) {
+            h.deathTime[i] = h.clock - 3;
+          } else {
+            const a = (k / ring.length) * Math.PI * 2;
+            h.x[i] = av.position.x + Math.cos(a) * 3.4;
+            h.z[i] = av.position.z + Math.sin(a) * 3.4;
+            h.cooldown[i] = 5;
+          }
+        });
+        av.body.health.fill(100);
+        av.body.bleed.fill(0);
+        av.body.pain = 0;
+        return { staged: ring.length, kills: window.__knox.combat.stats.kills };
+      }
       if (s.indoors) {
         // Step one tile in from a two-storey building's front door.
         const b = town.buildings.find((x) => x.rect.storeys > 1) ?? town.buildings[0];
@@ -151,6 +221,7 @@ try {
     });
     // Character shots are cropped tight: at 10 m of view height the figure is
     // ~90 px in a 1280-wide frame, which is too small to judge a pose in.
+    if (setupResult) process.stdout.write(`    setup: ${JSON.stringify(setupResult)}\n`);
     await page.screenshot({
       path: `${OUT}${shot.name}.png`,
       ...(shot.onRoad ? { clip: { x: 505, y: 225, width: 270, height: 270 } } : {}),

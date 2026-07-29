@@ -24,6 +24,8 @@ export const ACTION = {
   LEVEL_DOWN: 'levelDown',
   INTERACT: 'interact',
   PAUSE: 'pause',
+  ATTACK: 'attack',
+  SHOVE: 'shove',
 };
 
 const DEFAULT_BINDINGS = {
@@ -85,8 +87,19 @@ export class Input {
         -(e.clientY / window.innerHeight) * 2 + 1,
       );
     };
-    this._onPointerDown = () => (this.pointerDown = true);
-    this._onPointerUp = () => (this.pointerDown = false);
+    this._onPointerDown = (e) => {
+      this.pointerDown = true;
+      // Mouse buttons are actions like any other: left swings, right shoves.
+      const action = e.button === 2 ? ACTION.SHOVE : ACTION.ATTACK;
+      this.pressed.add(action);
+      this.held.add(action);
+    };
+    this._onPointerUp = (e) => {
+      this.pointerDown = false;
+      this.held.delete(e.button === 2 ? ACTION.SHOVE : ACTION.ATTACK);
+    };
+    // Without this a right-click shove also opens the browser context menu.
+    this._onContextMenu = (e) => e.preventDefault();
 
     window.addEventListener('keydown', this._onKeyDown);
     window.addEventListener('keyup', this._onKeyUp);
@@ -94,6 +107,7 @@ export class Input {
     window.addEventListener('pointermove', this._onPointerMove);
     window.addEventListener('pointerdown', this._onPointerDown);
     window.addEventListener('pointerup', this._onPointerUp);
+    window.addEventListener('contextmenu', this._onContextMenu);
     target.addEventListener('wheel', this._onWheel, { passive: false });
     this._wheelTarget = target;
   }
@@ -137,6 +151,7 @@ export class Input {
     window.removeEventListener('pointermove', this._onPointerMove);
     window.removeEventListener('pointerdown', this._onPointerDown);
     window.removeEventListener('pointerup', this._onPointerUp);
+    window.removeEventListener('contextmenu', this._onContextMenu);
     this._wheelTarget.removeEventListener('wheel', this._onWheel);
   }
 }

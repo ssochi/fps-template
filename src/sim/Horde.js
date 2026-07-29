@@ -34,6 +34,9 @@ export const STATE = {
   INVESTIGATE: 2,
   CHASE: 3,
   DEAD: 4,
+  /** Mid-swing at the player, or getting up after being knocked down. */
+  ATTACK: 5,
+  STAGGER: 6,
 };
 
 const SPEED = {
@@ -42,7 +45,14 @@ const SPEED = {
   [STATE.INVESTIGATE]: 0.95,
   [STATE.CHASE]: 2.1,
   [STATE.DEAD]: 0,
+  [STATE.ATTACK]: 0,
+  [STATE.STAGGER]: 0,
 };
+
+/** Starting health. Roughly two axe blows, or four with a bat. */
+const ZOMBIE_HEALTH = 100;
+/** A headshot-equivalent: damage above this to a standing zombie always kills. */
+export const OVERKILL = 95;
 
 /** How far a zombie can see, in tiles, and how wide its cone is. */
 const SIGHT_RANGE = 13;
@@ -84,7 +94,21 @@ export class Horde {
     this._wanderDir = new Int8Array(capacity);
     this._wanderTimer = new Float32Array(capacity);
 
-    this.stats = { alive: 0, chasing: 0, investigating: 0 };
+    this.health = new Float32Array(capacity);
+    /** Seconds left of a stagger, an attack windup, or getting back up. */
+    this.busy = new Float32Array(capacity);
+    /** Seconds until this one can swing again. */
+    this.cooldown = new Float32Array(capacity);
+    /** Simulation time this one died, so the fall clip starts at the right frame. */
+    this.deathTime = new Float32Array(capacity);
+    /** Knockback velocity, decayed each tick. */
+    this.vx = new Float32Array(capacity);
+    this.vz = new Float32Array(capacity);
+    /** Which limbs have been taken off, as a bitmask. Purely cosmetic for now. */
+    this.dismembered = new Uint8Array(capacity);
+
+    this.clock = 0;
+    this.stats = { alive: 0, dead: 0, chasing: 0, investigating: 0, attacking: 0 };
   }
 
   /** @returns {number} the new zombie's index, or -1 if full */
@@ -97,6 +121,12 @@ export class Horde {
     this.yaw[i] = this.rng.range(0, Math.PI * 2);
     this.state[i] = STATE.IDLE;
     this.attention[i] = 0;
+    this.health[i] = ZOMBIE_HEALTH;
+    this.busy[i] = 0;
+    this.cooldown[i] = 0;
+    this.vx[i] = 0;
+    this.vz[i] = 0;
+    this.dismembered[i] = 0;
     this.pace[i] = this.rng.range(0.78, 1.24);
     this.phase[i] = this.rng.next();
     this._wanderDir[i] = this.rng.int(0, 3);
@@ -138,14 +168,37 @@ export class Horde {
    */
   update(dt, target) {
     const grid = this.grid;
+    this.clock += dt;
     let chasing = 0;
     let investigating = 0;
+    let attacking = 0;
+    let dead = 0;
 
     for (let i = 0; i < this.count; i++) {
-      if (this.state[i] === STATE.DEAD) continue;
+      if (this.state[i] === STATE.DEAD) {
+        dead++;
+        continue;
+      }
 
       const tx = Math.floor(this.x[i]);
       const tz = Math.floor(this.z[i]);
+
+      if (this.cooldown[i] > 0) this.cooldown[i] -= dt;
+
+      // Knockback runs regardless of state, so a staggered zombie still slides.
+      if (this.vx[i] !== 0 || this.vz[i] !== 0) {
+        this._applyKnockback(i, dt);
+      }
+
+      // A staggered or mid-swing zombie is committed and cannot steer. That
+      // window is the entire reason shoving is worth doing.
+      if (this.busy[i] > 0) {
+        this.busy[i] -= dt;
+        if (this.state[i] === STATE.STAGGER || this.state[i] === STATE.ATTACK) {
+          if (this.state[i] === STATE.ATTACK) attacking++;
+          continue;
+        }
+      }
 
       // --- perception -------------------------------------------------
       let sees = false;
@@ -206,9 +259,93 @@ export class Horde {
       this._step(i, dir, SPEED[state] * this.pace[i], dt);
     }
 
-    this.stats.alive = this.count;
+    this.stats.alive = this.count - dead;
+    this.stats.dead = dead;
     this.stats.chasing = chasing;
     this.stats.investigating = investigating;
+    this.stats.attacking = attacking;
+  }
+
+  /** Slide a knocked-back zombie, stopping it at walls rather than through them. */
+  _applyKnockback(i, dt) {
+    const damp = Math.exp(-dt * 7);
+    const dx = this.vx[i] * dt;
+    const dz = this.vz[i] * dt;
+    const tx = Math.floor(this.x[i]);
+    const tz = Math.floor(this.z[i]);
+    const level = this.level[i];
+
+    const nx = this.x[i] + dx;
+    if (Math.floor(nx) === tx || this.grid.canPass(tx, tz, Math.floor(nx), tz, level)) {
+      this.x[i] = nx;
+    } else {
+      this.vx[i] = 0;
+    }
+    const nz = this.z[i] + dz;
+    if (Math.floor(nz) === tz || this.grid.canPass(tx, tz, tx, Math.floor(nz), level)) {
+      this.z[i] = nz;
+    } else {
+      this.vz[i] = 0;
+    }
+
+    this.vx[i] *= damp;
+    this.vz[i] *= damp;
+    if (Math.abs(this.vx[i]) < 0.02) this.vx[i] = 0;
+    if (Math.abs(this.vz[i]) < 0.02) this.vz[i] = 0;
+  }
+
+  /**
+   * Wound a zombie.
+   *
+   * @returns {{ killed: boolean, dismembered: boolean }}
+   */
+  damage(i, amount, { knockback = 0, dirX = 0, dirZ = 0, dismemberChance = 0, roll = Math.random } = {}) {
+    if (this.state[i] === STATE.DEAD) return { killed: false, dismembered: false };
+
+    this.health[i] -= amount;
+    this.vx[i] += dirX * knockback * 7;
+    this.vz[i] += dirZ * knockback * 7;
+
+    if (this.health[i] <= 0) {
+      this.state[i] = STATE.DEAD;
+      this.deathTime[i] = this.clock;
+      this.busy[i] = 0;
+      const lost = roll() < dismemberChance;
+      if (lost) this.dismembered[i] |= 1;
+      return { killed: true, dismembered: lost };
+    }
+
+    // Surviving a heavy blow still costs them a beat.
+    if (amount >= 20 || knockback > 0.5) {
+      this.state[i] = STATE.STAGGER;
+      this.busy[i] = Math.max(this.busy[i], 0.35 + knockback * 0.25);
+    }
+    return { killed: false, dismembered: false };
+  }
+
+  /** Knock down without wounding — what a shove does. */
+  stagger(i, seconds, { dirX = 0, dirZ = 0, knockback = 0 } = {}) {
+    if (this.state[i] === STATE.DEAD) return;
+    this.state[i] = STATE.STAGGER;
+    this.busy[i] = Math.max(this.busy[i], seconds);
+    this.vx[i] += dirX * knockback * 7;
+    this.vz[i] += dirZ * knockback * 7;
+  }
+
+  /** Begin a swing at the player. Combat owns the damage; this owns the pose. */
+  beginAttack(i, windup, cooldown) {
+    this.state[i] = STATE.ATTACK;
+    this.busy[i] = windup;
+    this.cooldown[i] = cooldown;
+  }
+
+  isDead(i) {
+    return this.state[i] === STATE.DEAD;
+  }
+
+  /** Can this one act at all right now? */
+  isReady(i) {
+    return this.state[i] !== STATE.DEAD && this.busy[i] <= 0 && this.cooldown[i] <= 0;
   }
 
   /** Move toward the centre of the neighbouring tile in `dir`. */
@@ -250,10 +387,12 @@ export class Horde {
     const lunge = clipTable.lunge;
     const idle = clipTable.idle;
 
+    const fall = clipTable.fall;
+    const attack = clipTable.attack;
+
     let n = 0;
     for (let i = 0; i < this.count; i++) {
       const state = this.state[i];
-      if (state === STATE.DEAD) continue;
 
       const o = n * 4;
       transform[o] = this.x[i];
@@ -261,14 +400,40 @@ export class Horde {
       transform[o + 2] = this.z[i];
       transform[o + 3] = this.yaw[i];
 
-      const c = state === STATE.CHASE ? lunge : state === STATE.WANDER ? shamble : shamble;
-      const active = state === STATE.IDLE ? idle : c;
+      // Corpses hold the last frame of the fall clip forever, so a cleared
+      // street stays visibly cleared. A negative rate means "play once and
+      // hold" — see CrowdMaterial.
+      let active;
+      let rate;
+      let timeOffset;
+      if (state === STATE.DEAD) {
+        active = fall;
+        rate = -9;
+        timeOffset = this.deathTime[i];
+      } else if (state === STATE.ATTACK) {
+        active = attack;
+        rate = -11;
+        timeOffset = clock - (0.55 - Math.max(0, this.busy[i]));
+      } else if (state === STATE.STAGGER) {
+        active = idle;
+        rate = 5 * this.pace[i];
+        timeOffset = -this.phase[i] * 4;
+      } else if (state === STATE.IDLE) {
+        active = idle;
+        rate = 5 * this.pace[i];
+        timeOffset = -this.phase[i] * 4;
+      } else {
+        active = state === STATE.CHASE ? lunge : shamble;
+        // Playback rate scales with the pace multiplier so a faster zombie's
+        // feet keep up with it — the ice-skating problem, in instance form.
+        rate = (state === STATE.CHASE ? 14 : 7) * this.pace[i];
+        timeOffset = -this.phase[i] * 4;
+      }
+
       clip[o] = active.start;
       clip[o + 1] = active.frames;
-      clip[o + 2] = this.phase[i];
-      // Playback rate scales with the pace multiplier so a faster zombie's feet
-      // keep up with it — the ice-skating problem, in instance form.
-      clip[o + 3] = (state === STATE.CHASE ? 14 : 7) * this.pace[i];
+      clip[o + 2] = timeOffset;
+      clip[o + 3] = rate;
 
       tint[n * 3] = this.tint[i * 3];
       tint[n * 3 + 1] = this.tint[i * 3 + 1];

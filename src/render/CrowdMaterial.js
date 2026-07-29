@@ -16,7 +16,10 @@ import { DoubleSide, MeshLambertMaterial, Vector2 } from 'three';
 const VERTEX_PARS = /* glsl */ `
 attribute float aVertexId;
 attribute vec4  aTransform;   // xyz = world position, w = yaw
-attribute vec4  aClip;        // x = start row, y = frames, z = phase, w = fps
+// x = start row, y = frame count, z = time offset in seconds,
+// w = frames per second — **negative means play once and hold the last frame**,
+// which is how corpses stay fallen and a swing does not loop.
+attribute vec4  aClip;
 attribute vec3  aTint;
 
 uniform sampler2D uVatPosition;
@@ -37,10 +40,21 @@ vec4 vatFetch( sampler2D tex, float vertexId, float row ) {
 
 const VERTEX_MAIN = /* glsl */ `
   float frames = max( aClip.y, 1.0 );
-  float t = uTime * aClip.w + aClip.z * frames;
-  float f0 = floor( mod( t, frames ) );
-  float f1 = mod( f0 + 1.0, frames );
-  float blend = fract( t );
+  bool  looping = aClip.w > 0.0;
+  float t = ( uTime - aClip.z ) * abs( aClip.w );
+
+  float f0, f1, blend;
+  if ( looping ) {
+    f0 = floor( mod( t, frames ) );
+    f1 = mod( f0 + 1.0, frames );
+    blend = fract( t );
+  } else {
+    // Clamp instead of wrapping, and hold the final frame indefinitely.
+    float ct = clamp( t, 0.0, frames - 1.0 );
+    f0 = floor( ct );
+    f1 = min( f0 + 1.0, frames - 1.0 );
+    blend = fract( ct );
+  }
 
   // Two adjacent frames, lerped. Sixteen baked frames read as smooth motion
   // this way; sampled with nearest they read as stop-motion.

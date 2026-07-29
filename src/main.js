@@ -13,6 +13,7 @@ import { World } from './world/World.js';
 import { generateTown } from './worldgen/Town.js';
 import { Player } from './entity/Player.js';
 import { HordeSystem } from './sim/HordeSystem.js';
+import { Combat } from './sim/Combat.js';
 import { STOREY, tileToWorld } from './core/constants.js';
 
 const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('app'));
@@ -40,6 +41,8 @@ isoCamera.snapTo(avatar.position);
 const horde = new HordeSystem(renderer.scene, world, { capacity: 400 });
 horde.populate(260);
 
+const combat = new Combat(horde.horde, avatar);
+
 // --- cursor aiming ------------------------------------------------------
 // The body turns toward the cursor, not toward travel, so backing away from
 // something while still facing it is possible. The pointer is projected onto
@@ -66,6 +69,8 @@ const moveDir = new Vector3();
 const camFocus = new Vector3();
 const intent = { move: moveDir, run: false, sneak: false, interact: false };
 const observer = { x: 0, z: 0, level: 0 };
+/** In-game seconds per real second. One real minute is an in-game hour. */
+const GAME_TIME_SCALE = 60;
 let paused = false;
 
 window.addEventListener('resize', () => renderer.setSize(window.innerWidth, window.innerHeight));
@@ -94,6 +99,12 @@ const loop = new Loop({
       intent.sneak = input.isHeld(ACTION.SNEAK);
       intent.interact = input.wasPressed(ACTION.INTERACT);
 
+      // Swinging is only possible when not already committed to something.
+      if (avatar.busy <= 0) {
+        if (input.wasPressed(ACTION.ATTACK)) combat.swing('attack');
+        else if (input.wasPressed(ACTION.SHOVE)) combat.swing('shove');
+      }
+
       // Screenshot hook: a still frame cannot hold a key down, so the smoke
       // test drives the animator directly. It must *replace* the normal update
       // rather than follow it — otherwise the idle pass and the forced pass
@@ -116,6 +127,10 @@ const loop = new Loop({
     observer.level = avatar.level;
     world.updateView(dt, observer, isoCamera);
     horde.update(dt, observer);
+    combat.update(dt);
+    // Bleeding is felt in real seconds; infection is measured in days. Body
+    // takes both clocks rather than one scaled one.
+    avatar.body.update(dt, dt * GAME_TIME_SCALE);
 
     // A small budget keeps a collapsing building off the critical path.
     world.flushDirty(2);
@@ -142,8 +157,14 @@ const loop = new Loop({
         `endurance [${'|'.repeat(bars)}${'.'.repeat(20 - bars)}]` +
         `${avatar.winded ? ' WINDED' : ''}   ${avatar.gait}\n` +
         `${world.stats.visible} tiles in sight   room ${world.grid.getRoom(observer.x, observer.z, observer.level)}\n` +
-        `horde ${horde.stats.instances} drawn / ${horde.horde.count} alive   ` +
-        `${horde.horde.stats.chasing} chasing   ${horde.horde.stats.investigating} investigating`;
+        `horde ${horde.horde.stats.alive} alive / ${horde.horde.stats.dead} down   ` +
+        `${horde.horde.stats.chasing} chasing   ${horde.horde.stats.attacking} attacking\n` +
+        `health ${Math.round(avatar.body.condition * 100)}%   ` +
+        `${avatar.weapon.def.name} ${Math.round(avatar.weapon.conditionFraction * 100)}%   ` +
+        `kills ${combat.stats.kills}` +
+        (avatar.body.infected ? `   INFECTED ${(avatar.body.infection * 100).toFixed(1)}%` : '') +
+        (avatar.body.alive ? '' : `   DEAD — ${avatar.body.causeOfDeath}`) +
+        (avatar.body.describe().length ? `\n${avatar.body.describe().join(', ')}` : '');
     }
   },
 });
@@ -151,4 +172,4 @@ const loop = new Loop({
 loop.start();
 
 // Console handle, and the hook the smoke test drives.
-window.__knox = { world, town, renderer, isoCamera, loop, avatar, input, horde };
+window.__knox = { world, town, renderer, isoCamera, loop, avatar, input, horde, combat };
