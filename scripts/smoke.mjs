@@ -49,7 +49,16 @@ const SHOTS = [
   { name: '12-looting', rotation: 0, zoom: 1, loot: true },
   // A barricaded window with the dead working on it, at night with a torch lit.
   { name: '13-siege', rotation: 0, zoom: 0, siege: true },
-  { name: '14-death', rotation: 0, zoom: 2, death: true, skills: true },
+  { name: '14-death', rotation: 0, zoom: 2, death: true, skills: true, profile: true },
+];
+
+/**
+ * The two screens that come *before* a run, captured from the plain URL. Every
+ * other shot boots through `?autostart` because a screenshot cannot click Begin.
+ */
+const MENU_SHOTS = [
+  { name: '00-title', screen: 'title' },
+  { name: '00b-creation', screen: 'create' },
 ];
 
 const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
@@ -94,7 +103,25 @@ try {
   });
   page.on('pageerror', (e) => problems.push(`pageerror: ${e.stack || e.message}`));
 
+  // --- the menu, before any run exists ---------------------------------
   await page.goto(APP_URL, { waitUntil: 'networkidle' });
+  await page.waitForSelector('#menu .m-title', { timeout: 10000 });
+  for (const shot of MENU_SHOTS) {
+    if (shot.screen === 'create') {
+      await page.click('[data-act="new"]');
+      await page.waitForSelector('.m-create', { timeout: 5000 });
+      // Pick a build so the screen shows a spent budget rather than a blank
+      // one — an untouched creation screen does not exercise any of its states.
+      for (const id of ['burglar', 'lightFooted', 'cowardly', 'restless', 'eagleEyed']) {
+        const sel = `[data-id="${id}"]`;
+        if (await page.$(sel)) await page.click(sel);
+      }
+    }
+    await page.screenshot({ path: `${OUT}${shot.name}.png` });
+  }
+
+  // --- the run ----------------------------------------------------------
+  await page.goto(`${APP_URL}?autostart`, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => window.__knox && window.__knox.loop.frame > 20, { timeout: 20000 });
 
   for (const shot of SHOTS) {
@@ -229,11 +256,20 @@ try {
         sk.award('blunt', 900);
         sk.award('carpentry', 240);
         sk.award('scavenging', 90);
+        // Give the survivor a build too, so the report shows the choice as well
+        // as the outcome — the two halves M12 put on this card together.
+        const prof = window.__knox.profile;
+        prof.occupation = 'police';
+        prof.traits = ['strong', 'clumsy', 'shortSighted'];
+        prof._mods = null;
+        prof.name = 'Marion Vance';
         window.__knox.hud.showDeath({
           cause: 'Torn apart',
           days: '3 days',
           kills: window.__knox.combat.stats.kills,
           skills: sk.summary().filter((x) => x.level > 0),
+          profile: prof.describe(),
+          name: prof.name,
           onRestart: () => {},
         });
       }
@@ -333,6 +369,47 @@ try {
     });
     process.stdout.write(`  shot ${shot.name}\n`);
   }
+
+  // --- save and continue, end to end -----------------------------------
+  // Unit tests cannot cover this: `Save` round-trips in isolation, but whether
+  // the *menu* reaches it goes through `main.js`, which no unit test imports.
+  // M8 shipped a crash that 240 green tests missed for exactly that reason.
+  const before = await page.evaluate(async () => {
+    const g = window.__knox;
+    g.avatar.position.set(g.avatar.position.x + 3, g.avatar.position.y, g.avatar.position.z);
+    g.skills.award('blade', 400);
+    await g.saveNow();
+    return { x: g.avatar.position.x, blade: g.skills.level('blade'), seed: g.seed };
+  });
+
+  await page.goto(APP_URL, { waitUntil: 'networkidle' });
+  await page.waitForSelector('#menu .m-title', { timeout: 10000 });
+  const continueEnabled = await page.$eval('[data-act="continue"]', (b) => !b.disabled);
+  if (!continueEnabled) problems.push('Continue was still disabled after a save');
+  await page.click('[data-act="continue"]');
+  // Restoring marks every chunk dirty, and `flushDirty` deliberately spreads
+  // the rebuild over frames. Wait for that queue to drain rather than for a
+  // frame count, or the numbers below report the cost of loading rather than
+  // the cost of playing — and a frame count is a guess about swiftshader's
+  // frame rate, which is not a thing worth guessing about.
+  await page.waitForFunction(
+    () => window.__knox && window.__knox.loop.frame > 10 && window.__knox.world.grid.dirtyChunks.size === 0,
+    { timeout: 60000 },
+  );
+
+  const after = await page.evaluate(() => ({
+    x: window.__knox.avatar.position.x,
+    blade: window.__knox.skills.level('blade'),
+    seed: window.__knox.seed,
+  }));
+  if (Math.abs(after.x - before.x) > 0.05) {
+    problems.push(`continue lost the player position: ${before.x} -> ${after.x}`);
+  }
+  if (after.blade !== before.blade) {
+    problems.push(`continue lost skills: blade ${before.blade} -> ${after.blade}`);
+  }
+  if (after.seed !== before.seed) problems.push(`continue lost the seed: ${after.seed}`);
+  console.log(`\n  continue: restored at x=${after.x.toFixed(1)}, blade ${after.blade} ✓`);
 
   // Measure what the horde actually costs in draw calls, rather than asserting
   // it. Render a frame with it hidden, then with it shown, and take the delta.

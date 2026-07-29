@@ -32,8 +32,8 @@ reasoning in [`blueprint.md` §8](./blueprint.md).
 | # | Milestone | Status | Passes | Notes |
 | --- | --- | --- | --- | --- |
 | M11 | Exploration (opens cycle 2) | ✅ Complete | 1 | Blueprint **v2** published; flow-field scaling wall identified; dead `Walker` class removed |
-| M12 | Character creation & the main menu | 🟡 Next | — | Traits, occupations, the unused `Skills.rate` hook, and the menu save/load has been waiting for |
-| M13 | The horde that moves | ⬜ Planned | — | Two-field pathing (fine radius + coarse map), stair edges, migration. The architectural item |
+| M12 | Character creation & the main menu | ✅ Complete | 5 | 326 tests; 25 traits / 9 occupations, autosave, `main.js` 411 → 52 lines |
+| M13 | The horde that moves | 🟡 Next | — | Two-field pathing (fine radius + coarse map), stair edges, migration. The architectural item |
 | M14 | Metagame events & the shutoff clock | ⬜ Planned | — | The helicopter; water and power failing on a schedule |
 | M15 | Water, fire and food | ⬜ Planned | — | Rain collectors, campfires, cooking, generators |
 | M16 | Full carpentry | ⬜ Planned | — | Placeable furniture and storage, built walls, barricade repair |
@@ -54,3 +54,7 @@ reasoning in [`blueprint.md` §8](./blueprint.md).
   7 → 4 as milestones shifted from building systems to connecting them. M16–M20
   build new systems; if they land in three passes, suspect the verification
   rather than celebrate the velocity.
+- **Look for getters nothing reads, not only exports nothing imports.** M12 found
+  two effects — `Skills.noiseScale` and `Moodles.enduranceRecovery` — that had
+  been computed and thrown away for two milestones. M11's dead-code survey missed
+  both because they are *used* within their own class. M22's should not.

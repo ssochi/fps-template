@@ -14,6 +14,7 @@
  * the time you have left.
  */
 import { events } from '../core/Events.js';
+import { MOD, Profile } from './Traits.js';
 
 export const PART = {
   HEAD: 0,
@@ -59,7 +60,12 @@ const NATURAL_CLOT = 0.012;
 const NATURAL_HEAL = 0.09;
 
 export class Body {
-  constructor() {
+  /**
+   * @param {import('./Traits.js').Profile} [profile] scales bleeding, infection
+   *   risk, pain and healing. Defaults to an unmodified survivor.
+   */
+  constructor(profile) {
+    this.profile = profile ?? Profile.default();
     /** 0–100 per part. */
     this.health = new Float32Array(6).fill(100);
     /** Bleed rate per part; nonzero means losing health continuously. */
@@ -124,8 +130,8 @@ export class Body {
     const info = PART_INFO[target];
 
     this.health[target] = Math.max(0, this.health[target] - amount);
-    this.bleed[target] += bleed * info.bleedScale;
-    this.pain = Math.min(100, this.pain + amount * 0.75);
+    this.bleed[target] += bleed * info.bleedScale * this.profile.mod(MOD.BLEED_RATE);
+    this.pain = Math.min(100, this.pain + amount * 0.75 * this.profile.mod(MOD.PAIN_RATE));
 
     // A heavy blow to a limb breaks it rather than merely hurting it.
     let fractured = false;
@@ -135,7 +141,10 @@ export class Body {
     }
 
     let infected = false;
-    const chance = INFECTION_CHANCE[kind] ?? 0;
+    // Resilient halves the odds and Thin-skinned raises them; neither can make
+    // a blunt wound infectious, because the multiplier applies to a base of
+    // zero. That is the reason this is a scale rather than an offset.
+    const chance = (INFECTION_CHANCE[kind] ?? 0) * this.profile.mod(MOD.INFECTION_RISK);
     if (!this.infected && chance > 0 && roll() < chance) {
       this.infected = true;
       this.infection = 1e-6; // nonzero so the countdown starts
@@ -167,12 +176,15 @@ export class Body {
   update(dt, gameDt = dt) {
     if (!this.alive) return;
 
+    // A Fast Healer both clots and mends quicker, so the same multiplier acts
+    // on the clot rate and on natural healing.
+    const heal = this.profile.mod(MOD.HEAL_RATE);
     for (let i = 0; i < 6; i++) {
       if (this.bleed[i] > 0) {
         this.health[i] = Math.max(0, this.health[i] - this.bleed[i] * BLEED_DAMAGE * dt);
-        this.bleed[i] = Math.max(0, this.bleed[i] - NATURAL_CLOT * dt);
+        this.bleed[i] = Math.max(0, this.bleed[i] - NATURAL_CLOT * heal * dt);
       } else if (this.health[i] < 100) {
-        this.health[i] = Math.min(100, this.health[i] + NATURAL_HEAL * dt);
+        this.health[i] = Math.min(100, this.health[i] + NATURAL_HEAL * heal * dt);
       }
     }
 

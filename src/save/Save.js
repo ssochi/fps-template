@@ -64,6 +64,9 @@ export function serialise(game) {
     version: VERSION,
     seed: game.seed,
     savedAt: null, // stamped by the caller; Date is not available in worldgen
+    // Who the survivor is, so Continue restores the character rather than the
+    // last one the menu happened to be showing. It is three strings.
+    profile: game.profile?.toJSON() ?? null,
     clock: { elapsed: clock.elapsed },
     player: {
       x: avatar.position.x,
@@ -137,6 +140,10 @@ export function restore(game, data, { Item, Container, WeaponInstance, Skills })
 
   Object.assign(moodles, data.moodles);
   game.skills = Skills.fromJSON(data.skills);
+  // The XP multiplier is a property of the character, not of the save, so it is
+  // re-derived from the profile rather than stored twice and allowed to drift.
+  if (game.profile) game.skills.rate = game.profile.mod('xpRate');
+  avatar.skills = game.skills;
 
   const { doors, barricades, containers, dead } = data.world;
   for (let i = 0; i < doors.length; i += 2) grid.state[doors[i]] = doors[i + 1];

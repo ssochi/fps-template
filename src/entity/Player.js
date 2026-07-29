@@ -27,6 +27,7 @@ import { Body } from '../sim/Body.js';
 import { WeaponInstance } from '../items/Weapons.js';
 import { Inventory } from '../items/Container.js';
 import { Item } from '../items/ItemDb.js';
+import { MOD, Profile } from '../sim/Traits.js';
 
 /**
  * Reverse map from a weapon definition back to the item that carries it, so an
@@ -59,21 +60,30 @@ const VAULT_TIME = 0.55;
 const DOOR_TIME = 0.3;
 
 export class Player extends Entity {
-  /** @param {import('../world/TileGrid.js').TileGrid} grid */
-  constructor(grid, { colors } = {}) {
+  /**
+   * @param {import('../world/TileGrid.js').TileGrid} grid
+   * @param {{ colors?: object, profile?: Profile }} [opts]
+   */
+  constructor(grid, { colors, profile } = {}) {
     super('player');
     this.grid = grid;
     this.radius = 0.26;
+
+    /**
+     * Who this survivor chose to be. Defaults to an unmodified one so every
+     * call site can multiply unconditionally — see `sim/Traits.js`.
+     */
+    this.profile = profile ?? Profile.default();
 
     this.character = new Character(colors);
     this.object.add(this.character.root);
 
     /** Body-part health, bleeding and infection. */
-    this.body = new Body();
+    this.body = new Body(this.profile);
     /** What is in your hands. */
     this.weapon = new WeaponInstance('crowbar');
     /** What you are carrying. Weight, not slots — see items/Container.js. */
-    this.inventory = new Inventory(10);
+    this.inventory = new Inventory(10 * this.profile.mod(MOD.CARRY_CAPACITY));
     /** Set by main once Moodles exists; injuries and moodles both slow you. */
     this.moodles = null;
     /** Whether the torch in the bag is lit. */
@@ -158,6 +168,7 @@ export class Player extends Entity {
     // are consequences of choices the player made, which is the point.
     let speed = SPEED[mode] * this.body.mobility * this.inventory.mobility;
     if (this.moodles) speed *= this.moodles.mobility;
+    speed *= this.profile.mod(MOD.WALK_SPEED);
 
     // Backpedalling: scale by how much the move direction opposes the facing.
     const forward = this.forward(this._delta);
@@ -185,9 +196,15 @@ export class Player extends Entity {
   }
 
   _drainEndurance(dt, gait) {
-    if (gait === 'run') this.endurance -= ENDURANCE.runDrain * dt;
-    else if (gait === 'sneak') this.endurance -= ENDURANCE.sneakDrain * dt;
-    else this.endurance += ENDURANCE.recover * dt;
+    const drain = this.profile.mod(MOD.ENDURANCE_DRAIN);
+    let recover = ENDURANCE.recover * this.profile.mod(MOD.ENDURANCE_RECOVERY);
+    // Being underfed or dehydrated slows recovery but never the drain — going
+    // hungry should not make sprinting cheaper.
+    if (this.moodles) recover *= this.moodles.enduranceRecovery;
+
+    if (gait === 'run') this.endurance -= ENDURANCE.runDrain * drain * dt;
+    else if (gait === 'sneak') this.endurance -= ENDURANCE.sneakDrain * drain * dt;
+    else this.endurance += recover * dt;
 
     this.endurance = Math.max(0, Math.min(1, this.endurance));
 
@@ -276,14 +293,15 @@ export class Player extends Entity {
       if (this.grid.setDoorOpen(p.x, p.z, this.level, p.open)) {
         // Doors are loud. M5's horde listens for this.
         events.emit('noise:made', {
-          x: p.x, z: p.z, level: this.level, loudness: p.open ? 6 : 4, source: 'door',
+          x: p.x, z: p.z, level: this.level,
+          loudness: (p.open ? 6 : 4) * this.noiseScale, source: 'door',
         });
       }
     } else if (p.type === 'vault') {
       this.position.set(p.x + 0.5, this.level * STOREY, p.z + 0.5);
       this.endurance = Math.max(0, this.endurance - 0.05);
       events.emit('noise:made', {
-        x: p.x, z: p.z, level: this.level, loudness: 5, source: 'vault',
+        x: p.x, z: p.z, level: this.level, loudness: 5 * this.noiseScale, source: 'vault',
       });
     }
   }
@@ -380,6 +398,20 @@ export class Player extends Entity {
     // in the sense that it is the most visible.
     events.emit('torch:toggled', { on: this.torchOn });
     return this.torchOn;
+  }
+
+  /**
+   * How loud everything this survivor does is.
+   *
+   * One getter, applied at every point where *the player* emits noise — doors,
+   * vaults, swings, hammering. It is the only place traits and the Sneaking
+   * skill meet, and it exists because before M12 `Skills.noiseScale` was
+   * computed and read by nobody: sneaking levelled up and changed nothing.
+   *
+   * Zombie and siege noise deliberately does not pass through here.
+   */
+  get noiseScale() {
+    return this.profile.mod(MOD.NOISE) * (this.skills?.noiseScale ?? 1);
   }
 
   /** Metres per second the player would move right now, for the HUD. */

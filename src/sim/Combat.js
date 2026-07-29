@@ -21,6 +21,7 @@ import { SHOVE } from '../items/Weapons.js';
 import { STATE } from './Horde.js';
 import { events } from '../core/Events.js';
 import { worldToTile } from '../core/constants.js';
+import { MOD } from './Traits.js';
 
 /** How close a zombie must be to land a bite. */
 const REACH = 0.95;
@@ -91,7 +92,13 @@ export class Combat {
           knockback: SHOVE.knockback,
         });
       } else {
-        const damage = player.weapon.effectiveDamage() * (0.7 + 0.3 * dexterity);
+        // Three multipliers, and they are three different stories: the weapon's
+        // condition, how well the arms holding it still work, and who is
+        // holding it. Skill is applied by the caller, which owns the XP too.
+        const damage =
+          player.weapon.effectiveDamage() *
+          (0.7 + 0.3 * dexterity) *
+          player.profile.mod(MOD.MELEE_DAMAGE);
         const result = this.horde.damage(index, damage, {
           knockback: spec.knockback,
           dirX: nx,
@@ -115,7 +122,7 @@ export class Combat {
       x: tile.x,
       z: tile.z,
       level: player.level,
-      loudness: spec.noise,
+      loudness: spec.noise * player.noiseScale,
       source: kind,
     });
 

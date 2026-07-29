@@ -29,6 +29,7 @@
  */
 import { events } from '../core/Events.js';
 import { PART } from './Body.js';
+import { MOD, Profile } from './Traits.js';
 
 /** Tier names, indexed 1–4; tier 0 is "fine" and is not displayed. */
 export const TIERS = {
@@ -63,9 +64,14 @@ const SLEEP_RECOVERY = 3.2;
 const COMFORT = { low: 0.42, high: 0.58 };
 
 export class Moodles {
-  /** @param {import('./Body.js').Body} body */
-  constructor(body) {
+  /**
+   * @param {import('./Body.js').Body} body
+   * @param {import('./Traits.js').Profile} [profile] scales the four rates.
+   *   Defaults to the body's own profile, so the usual case needs no argument.
+   */
+  constructor(body, profile) {
     this.body = body;
+    this.profile = profile ?? body?.profile ?? Profile.default();
 
     /** 0 = full, 1 = starving. */
     this.hunger = 0;
@@ -121,6 +127,17 @@ export class Moodles {
   // --- simulation --------------------------------------------------------
 
   /**
+   * The base rate for a track, scaled by whoever this survivor is. One accessor
+   * rather than three multiplications inline, so a trait cannot be applied in
+   * one branch and forgotten in another.
+   * @param {'hunger'|'thirst'|'fatigue'} id
+   */
+  rate(id) {
+    const MODS = { hunger: MOD.HUNGER_RATE, thirst: MOD.THIRST_RATE, fatigue: MOD.FATIGUE_RATE };
+    return RATES[id] * this.profile.mod(MODS[id]);
+  }
+
+  /**
    * Two clocks, for the same reason `Body` has two.
    *
    * Hunger, thirst, fatigue and temperature are measured in hours and belong on
@@ -144,14 +161,16 @@ export class Moodles {
     // Exertion burns food and water faster; this is why a long fight is
     // expensive in more than stamina.
     const effort = 1 + exertion * 1.4;
-    this.hunger = clamp01(this.hunger + RATES.hunger * gameDt * effort);
-    this.thirst = clamp01(this.thirst + RATES.thirst * gameDt * effort);
+    this.hunger = clamp01(this.hunger + this.rate('hunger') * gameDt * effort);
+    this.thirst = clamp01(this.thirst + this.rate('thirst') * gameDt * effort);
 
     if (this.asleep) {
+      // Recovery is not scaled by Restless: tiring faster is the trait, needing
+      // a longer night as well would be the same penalty charged twice.
       this.fatigue = clamp01(this.fatigue - RATES.fatigue * gameDt * SLEEP_RECOVERY);
       if (this.fatigue <= 0.02) this.wake('rested');
     } else {
-      this.fatigue = clamp01(this.fatigue + RATES.fatigue * gameDt);
+      this.fatigue = clamp01(this.fatigue + this.rate('fatigue') * gameDt);
       // Past exhaustion the choice is taken away from you.
       if (this.fatigue >= 0.995 && !this.collapsed) {
         this.collapsed = true;
@@ -184,9 +203,9 @@ export class Moodles {
 
     // Being cold makes you burn food; being hot makes you drink.
     if (this.temperature < COMFORT.low) {
-      this.hunger = clamp01(this.hunger + RATES.hunger * gameDt * 0.6);
+      this.hunger = clamp01(this.hunger + this.rate('hunger') * gameDt * 0.6);
     } else if (this.temperature > COMFORT.high) {
-      this.thirst = clamp01(this.thirst + RATES.thirst * gameDt * 0.5);
+      this.thirst = clamp01(this.thirst + this.rate('thirst') * gameDt * 0.5);
     }
   }
 
@@ -195,10 +214,13 @@ export class Moodles {
     // makes it worse, which is what makes a torch worth the noise and the light.
     const darkness = 1 - daylight;
     const pressure = Math.min(1, threats / 6) * (0.6 + darkness * 0.5);
-    const target = Math.min(1, pressure + this.body.pain / 260);
+    // Nerve changes both where fear settles and how fast it gets there. Brave
+    // is not "panics slower" — it is "is less frightened by the same room".
+    const nerve = this.profile.mod(MOD.PANIC_RATE);
+    const target = Math.min(1, (pressure + this.body.pain / 260) * nerve);
     // Panic spikes over a couple of seconds and takes most of a minute to
     // settle, in *real* time — it should outlast the thing that caused it.
-    const rate = target > this.panic ? dt / 2.5 : dt / 40;
+    const rate = target > this.panic ? (dt / 2.5) * nerve : dt / 40 / nerve;
     this.panic += Math.sign(target - this.panic) * Math.min(Math.abs(target - this.panic), rate);
     this.panic = clamp01(this.panic);
   }

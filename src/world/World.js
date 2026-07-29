@@ -25,7 +25,7 @@ export class World {
    * @param {number} depth
    * @param {number} levels
    */
-  constructor(scene, width, depth, levels = 1, { maxRooms = 1024 } = {}) {
+  constructor(scene, width, depth, levels = 1, { maxRooms = 1024, sightRadius = 17 } = {}) {
     this.grid = new TileGrid(width, depth, levels);
     this.scene = scene;
 
@@ -33,7 +33,9 @@ export class World {
     this.group.name = 'world';
     scene.add(this.group);
 
-    this.fog = new FogOfWar(this.grid);
+    // How far the observer sees is a property of the observer, so M12's
+    // Eagle-eyed and Short-sighted traits reach the fog through here.
+    this.fog = new FogOfWar(this.grid, { radius: Math.round(sightRadius) });
     this.cutaway = new Cutaway(this, maxRooms);
 
     // One set of uniform objects shared by the beauty and depth materials, so

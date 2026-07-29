@@ -4,6 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Knox</title>
+    <!--
+      Inline, so there is no favicon request to 404. The screenshot gate treats
+      any console error as a failure, and a missing favicon is exactly the kind
+      of noise that trains you to ignore it.
+    -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230d1219'/%3E%3Cpath d='M4 3h2v4l4-4h2.5L8.5 7.5 13 13h-2.5L6 8.5V13H4z' fill='%23c96f4a'/%3E%3C/svg%3E" />
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1219; }
       #app { position: fixed; inset: 0; display: block; }

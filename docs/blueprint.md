@@ -75,7 +75,8 @@ These are load-bearing. Each was bought with a bug.
 
 ```
 src/
-  main.js              bootstrap and wiring (411 lines — the one file with no seam)
+  main.js              the shell: menu, then hand off (52 lines)
+  Game.js              one run — everything main.js used to build at import time
   core/
     constants.js       units: TILE, STOREY, CHUNK, DIR, tile<->world
     Loop.js            fixed 30 Hz sim, interpolated render, sub-step guard
@@ -116,6 +117,7 @@ src/
     Body.js            six parts, bleeding, fracture, infection
     Moodles.js         seven tracks, each changing a number someone else reads
     Skills.js          XP from doing; every skill is a plain multiplier
+    Traits.js          occupations, traits, and a closed list of 16 multipliers
     Construction.js    player build jobs, and the dead breaking in
   items/
     ItemDb.js          24 items; age, spoilage, degrading nutrition
@@ -124,7 +126,9 @@ src/
     Recipes.js         a zero-count material means "held, not spent"
     Weapons.js
   audio/Audio.js       synthesised; no audio files anywhere in the repo
-  ui/Hud.js, Panels.js DOM, not canvas
+  ui/
+    Hud.js, Panels.js  DOM, not canvas
+    MainMenu.js        title and character creation
   save/Save.js         seed + deltas into IndexedDB; fog deliberately not saved
 ```
 
@@ -243,6 +247,10 @@ settings, death report v2. Closes cycle 2; **M22 opens cycle 3 as a fresh
 Exploration milestone.**
 
 ## 9. Risks
+
+**Amendment (M12).** `main.js` split into a shell plus `Game.js` a milestone
+early: a menu means a run has to be something you *construct*, not something that
+happens when a module loads. The M13 entry below is discharged.
 
 | Risk | Mitigation |
 | --- | --- |

@@ -166,7 +166,7 @@ export class Hud {
    * plainly and show how long you lasted, because those are the two things a
    * player wants when deciding whether to go again.
    */
-  showDeath({ cause, kills, days, skills = [], onRestart }) {
+  showDeath({ cause, kills, days, skills = [], profile = [], name, onRestart }) {
     const el = this.el['hud-death'];
     el.classList.remove('hidden');
     // What you got good at is part of the report: it is the record of how you
@@ -174,14 +174,23 @@ export class Hud {
     const learned = skills.length
       ? `<p class="learned">${skills.map((s) => `${s.name} ${s.level}`).join(' · ')}</p>`
       : '';
+    // And who you chose to be is the other half of the sentence: the traits you
+    // took are the reason the run went the way it did, so they belong beside
+    // the cause rather than only on the screen where you picked them.
+    const chosen = profile.length
+      ? `<p class="chosen">${profile
+          .map((d) => `<span class="${d.kind}">${d.name}</span>`)
+          .join('')}</p>`
+      : '';
     el.innerHTML = `
       <div class="death-card">
-        <h1>This is how you died</h1>
+        <h1>This is how ${name ? `${escapeHtml(name)}` : 'you'} died</h1>
         <p class="cause">${cause}</p>
         <dl>
           <div><dt>Survived</dt><dd>${days ?? '—'}</dd></div>
           <div><dt>Zombies killed</dt><dd>${kills ?? 0}</dd></div>
         </dl>
+        ${chosen}
         ${learned}
         <button id="death-restart">Begin again</button>
       </div>
@@ -264,6 +273,11 @@ const CSS = `
 .death-card dt { opacity: .5; font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
 .death-card dd { margin: 2px 0 0; font-size: 16px; }
 .death-card .learned { opacity: .55; font-size: 11px; margin: 0 0 18px; }
+.death-card .chosen { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; margin: 0 0 12px; }
+.death-card .chosen span { font-size: 11px; padding: 2px 8px; border-radius: 2px; border: 1px solid; }
+.death-card .chosen .occupation { border-color: #5b7691; color: #b9cbdd; }
+.death-card .chosen .positive { border-color: #8a7440; color: #d9c48b; }
+.death-card .chosen .negative { border-color: #47734f; color: #9ec9a7; }
 .death-card button {
   font: inherit; color: #d8dee4; background: rgba(255,255,255,.06);
   border: 1px solid rgba(255,255,255,.16); border-radius: 3px;
@@ -272,3 +286,10 @@ const CSS = `
 }
 .death-card button:hover { background: rgba(255,255,255,.12); }
 `;
+
+/** The survivor's name is player-supplied text going into innerHTML. */
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]
+  ));
+}

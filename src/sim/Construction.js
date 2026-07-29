@@ -104,7 +104,7 @@ export class Construction {
         x: t.x,
         z: t.z,
         level: this.player.level,
-        loudness: job.recipe.noise ?? 4,
+        loudness: (job.recipe.noise ?? 4) * this.player.noiseScale,
         source: 'crafting',
       });
     }
