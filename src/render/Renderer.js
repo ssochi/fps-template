@@ -11,7 +11,7 @@ import {
   HemisphereLight,
   Color,
   DirectionalLight,
-  PCFSoftShadowMap,
+  PCFShadowMap,
   Scene,
   Vector3,
   WebGLRenderer,
@@ -30,7 +30,8 @@ export class Renderer {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    // PCFSoftShadowMap is deprecated in r185 and silently downgrades to this.
+    this.renderer.shadowMap.type = PCFShadowMap;
     // Mild filmic curve: the palette is deliberately low-saturation and
     // high-contrast, and linear output crushes the dusk range flat.
     this.renderer.toneMapping = ACESFilmicToneMapping;
@@ -62,13 +63,15 @@ export class Renderer {
     /**
      * Direction *toward* the sun.
      *
-     * Chosen so it is never parallel to the camera rig. At any of the four
-     * snapped rotations the view shows two facades; with the sun on the rig's
-     * axis both of them light identically and the building reads as a flat
-     * silhouette. Offsetting it puts one facade in key light and the other in
-     * ambient, which is what gives isometric geometry its depth.
+     * Driven by the clock, but never allowed to line up with the camera rig: at
+     * any of the four snapped rotations the view shows two facades, and with the
+     * sun on the rig's axis both light identically and the building reads as a
+     * flat silhouette. The azimuth is offset to keep one facade in key light and
+     * the other in fill, which is where isometric depth comes from.
      */
     this.sunDirection = new Vector3(0.62, 0.62, -0.48).normalize();
+    /** 0 = night, 1 = noon. Set from the clock each frame. */
+    this.daylight = 1;
 
     this.setSize(window.innerWidth, window.innerHeight);
   }
@@ -77,6 +80,46 @@ export class Renderer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.maxPixelRatio));
     this.renderer.setSize(width, height, false);
     this.isoCamera.setAspect(width / height);
+  }
+
+  /**
+   * Point the key light at the sun's current position and fade the whole scene
+   * toward night.
+   *
+   * Night is not merely dimmer: the fill goes cold and blue and the key light
+   * drops almost to nothing, because the interesting thing about darkness in
+   * this genre is that it takes away your ability to see what is coming, not
+   * that it lowers a brightness slider.
+   *
+   * @param {{ elevation: number, azimuth: number }} angles
+   * @param {number} daylight 0–1
+   */
+  setSun(angles, daylight) {
+    this.daylight = daylight;
+    const ce = Math.cos(angles.elevation);
+    this.sunDirection
+      .set(Math.sin(angles.azimuth) * ce, Math.max(0.12, Math.sin(angles.elevation)), Math.cos(angles.azimuth) * ce)
+      .normalize();
+
+    // Night keeps a moonlight floor rather than going to true black. Real
+    // darkness is accurate and unplayable: the player still has to be able to
+    // read a silhouette and a doorway. Torches and lamps, which are what should
+    // make the difference between this and daylight, are a later milestone.
+    // Night keeps a moonlight floor rather than going to true black.
+    //
+    // Physically, an unlit street under overcast sky is unreadable, and the
+    // first pass at this was exactly that — a black screen with a HUD on it.
+    // The dynamic that is *supposed* to make night dangerous is not being
+    // unable to see at all, it is being unable to see *far*, which the fog of
+    // war already does. So the floor sits where silhouettes and doorways still
+    // read. When torches and lamps exist this can come back down, because then
+    // darkness will have an answer.
+    const dayness = Math.max(0, Math.min(1, daylight));
+    this.key.intensity = MOOD.keyIntensity * (0.1 + dayness * 0.9);
+    this.key.color.setHex(dayness > 0.5 ? MOOD.key : MOOD.keyDusk);
+    this.fill.intensity = MOOD.fillIntensity * (0.46 + dayness * 0.54);
+    this.fill.color.setHex(dayness > 0.35 ? MOOD.fillSky : MOOD.fillNight);
+    this.scene.background.setHex(dayness > 0.35 ? MOOD.sky : MOOD.skyNight);
   }
 
   /**

@@ -55,5 +55,10 @@ export const MOOD = {
   fillGround: 0x4a4336,
   fillIntensity: 2.3,
   key: 0xffe0b4,
+  /** Low sun: warmer and weaker. */
+  keyDusk: 0xffb582,
   keyIntensity: 2.3,
+  /** Night: the fill goes cold, and the sky with it. */
+  fillNight: 0x2c3c58,
+  skyNight: 0x0d1219,
 };

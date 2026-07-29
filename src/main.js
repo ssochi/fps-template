@@ -10,14 +10,18 @@ import { IsoCamera } from './render/IsoCamera.js';
 import { Loop } from './core/Loop.js';
 import { ACTION, Input } from './core/Input.js';
 import { World } from './world/World.js';
+import { FLAG } from './world/TileGrid.js';
 import { generateTown } from './worldgen/Town.js';
 import { Player } from './entity/Player.js';
 import { HordeSystem } from './sim/HordeSystem.js';
 import { Combat } from './sim/Combat.js';
+import { Clock } from './core/Clock.js';
+import { Moodles } from './sim/Moodles.js';
+import { Hud } from './ui/Hud.js';
+import { events } from './core/Events.js';
 import { STOREY, tileToWorld } from './core/constants.js';
 
 const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('app'));
-const statsEl = document.getElementById('stats');
 
 const isoCamera = new IsoCamera({ aspect: window.innerWidth / window.innerHeight });
 const renderer = new Renderer(canvas, isoCamera);
@@ -42,6 +46,31 @@ const horde = new HordeSystem(renderer.scene, world, { capacity: 400 });
 horde.populate(260);
 
 const combat = new Combat(horde.horde, avatar);
+
+// --- survival -----------------------------------------------------------
+const clock = new Clock({ hour: 9 });
+const moodles = new Moodles(avatar.body);
+avatar.moodles = moodles;
+const hud = new Hud();
+
+// The death report needs facts the Body does not have: how long you lasted and
+// how many you took with you. Assembling them here keeps Body ignorant of the UI.
+events.on('player:died', ({ cause }) => {
+  hud.showDeath({
+    cause: DEATH_CAUSES[cause] ?? cause,
+    days: `${clock.day + 1} day${clock.day === 0 ? '' : 's'}`,
+    kills: combat.stats.kills,
+  });
+});
+
+const DEATH_CAUSES = {
+  wounds: 'Torn apart',
+  injuries: 'Died of your injuries',
+  'blood loss': 'Bled out',
+  infection: 'Turned',
+  starvation: 'Starved',
+  dehydration: 'Died of thirst',
+};
 
 // --- cursor aiming ------------------------------------------------------
 // The body turns toward the cursor, not toward travel, so backing away from
@@ -69,8 +98,6 @@ const moveDir = new Vector3();
 const camFocus = new Vector3();
 const intent = { move: moveDir, run: false, sneak: false, interact: false };
 const observer = { x: 0, z: 0, level: 0 };
-/** In-game seconds per real second. One real minute is an in-game hour. */
-const GAME_TIME_SCALE = 60;
 let paused = false;
 
 window.addEventListener('resize', () => renderer.setSize(window.innerWidth, window.innerHeight));
@@ -128,9 +155,20 @@ const loop = new Loop({
     world.updateView(dt, observer, isoCamera);
     horde.update(dt, observer);
     combat.update(dt);
-    // Bleeding is felt in real seconds; infection is measured in days. Body
-    // takes both clocks rather than one scaled one.
-    avatar.body.update(dt, dt * GAME_TIME_SCALE);
+
+    // One clock, advanced in one place. Bleeding is felt in real seconds;
+    // hunger and infection are measured in days, so Body and Moodles are handed
+    // both rather than each inventing a scale.
+    const gameDt = clock.advance(dt);
+    avatar.body.update(dt, gameDt);
+    moodles.update(dt, gameDt, {
+      indoors: world.grid.hasFlag(observer.x, observer.z, observer.level, FLAG.INDOOR),
+      daylight: clock.daylight,
+      exertion: avatar.currentSpeed / 5,
+      threats: horde.horde.stats.chasing,
+    });
+    // Fatigue caps how much endurance you can hold at all.
+    avatar.endurance = Math.min(avatar.endurance, moodles.enduranceCeiling);
 
     // A small budget keeps a collapsing building off the critical path.
     world.flushDirty(2);
@@ -141,30 +179,23 @@ const loop = new Loop({
     // storeys don't push the view into the floor.
     camFocus.set(avatar.position.x, avatar.level * STOREY + 0.9, avatar.position.z);
     isoCamera.update(frameTime, camFocus);
+    renderer.setSun(clock.sunAngles(), clock.daylight);
     renderer.updateLights(camFocus);
     horde.render(loop.elapsed);
     renderer.render();
     input.endFrame();
 
-    if (loop.frame % 15 === 0) {
+    if (loop.frame % 12 === 0) {
       const r = renderer.info;
-      const bars = Math.round(avatar.endurance * 20);
-      statsEl.textContent =
-        `${loop.fps.toFixed(0)} fps   sim ${loop.lastUpdateMs.toFixed(2)}ms   draw ${loop.lastRenderMs.toFixed(2)}ms\n` +
-        `${r.calls} draws   ${(r.triangles / 1000).toFixed(1)}k tris   ${world.stats.chunks} chunks\n` +
-        `tile ${Math.floor(avatar.position.x)},${Math.floor(avatar.position.z)}  storey ${avatar.level}` +
-        `   zoom ${isoCamera.viewHeight}m${paused ? '   [PAUSED]' : ''}\n` +
-        `endurance [${'|'.repeat(bars)}${'.'.repeat(20 - bars)}]` +
-        `${avatar.winded ? ' WINDED' : ''}   ${avatar.gait}\n` +
-        `${world.stats.visible} tiles in sight   room ${world.grid.getRoom(observer.x, observer.z, observer.level)}\n` +
-        `horde ${horde.horde.stats.alive} alive / ${horde.horde.stats.dead} down   ` +
-        `${horde.horde.stats.chasing} chasing   ${horde.horde.stats.attacking} attacking\n` +
-        `health ${Math.round(avatar.body.condition * 100)}%   ` +
-        `${avatar.weapon.def.name} ${Math.round(avatar.weapon.conditionFraction * 100)}%   ` +
-        `kills ${combat.stats.kills}` +
-        (avatar.body.infected ? `   INFECTED ${(avatar.body.infection * 100).toFixed(1)}%` : '') +
-        (avatar.body.alive ? '' : `   DEAD — ${avatar.body.causeOfDeath}`) +
-        (avatar.body.describe().length ? `\n${avatar.body.describe().join(', ')}` : '');
+      hud.update({
+        clock,
+        player: avatar,
+        moodles,
+        debug:
+          `${loop.fps.toFixed(0)} fps · sim ${loop.lastUpdateMs.toFixed(2)}ms · ${r.calls} draws\n` +
+          `${horde.horde.stats.alive} alive · ${horde.horde.stats.dead} down · ` +
+          `${horde.horde.stats.chasing} chasing · ${combat.stats.kills} killed`,
+      });
     }
   },
 });
@@ -172,4 +203,4 @@ const loop = new Loop({
 loop.start();
 
 // Console handle, and the hook the smoke test drives.
-window.__knox = { world, town, renderer, isoCamera, loop, avatar, input, horde, combat };
+window.__knox = { world, town, renderer, isoCamera, loop, avatar, input, horde, combat, clock, moodles, hud };

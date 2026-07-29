@@ -5,28 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Knox</title>
     <style>
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #14181e; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1219; }
       #app { position: fixed; inset: 0; display: block; }
+      /* The HUD builds its own markup and styles; this only positions the layer. */
       #hud {
         position: fixed; inset: 0; pointer-events: none;
-        font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
-        color: #cfd6dd; text-shadow: 0 1px 2px rgba(0,0,0,.85);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, .85);
       }
-      #stats { position: absolute; top: 10px; left: 12px; white-space: pre; opacity: .9; }
-      #help  { position: absolute; bottom: 12px; left: 12px; white-space: pre; opacity: .55; }
-      #title {
-        position: absolute; top: 10px; right: 14px;
-        letter-spacing: .22em; text-transform: uppercase; opacity: .45;
-      }
+      #hud-death { pointer-events: auto; }
     </style>
   </head>
   <body>
     <canvas id="app"></canvas>
-    <div id="hud">
-      <div id="stats"></div>
-      <div id="title">Knox — M6</div>
-      <div id="help">WASD move · mouse aim · LMB attack · RMB shove · shift run · ctrl sneak · E interact · Q/. rotate · wheel zoom</div>
-    </div>
+    <div id="hud"></div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

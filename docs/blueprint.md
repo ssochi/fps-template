@@ -5,6 +5,11 @@
 
 **Amendments since v1**
 
+- **M7 — one module owns the time scale.** `core/Clock.js` converts real seconds
+  to in-game ones, and every system that ages takes *both* clocks explicitly.
+  Two separate bugs (M6 bleeding, M7 panic) were rates written against the wrong
+  clock, so choosing one implicitly is no longer allowed.
+
 - **M5 — the two highest-risk bets are settled.** Vertex animation textures and
   flow fields both work as hoped: 260 animated zombies in 2 draw calls, AI for
   400 in 0.22 ms per tick. The risk table's first row can be struck.

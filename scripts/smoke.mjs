@@ -42,6 +42,10 @@ const SHOTS = [
   // Verifies the fall clip holds its last frame — a corpse that stood back up
   // would mean the non-looping clip path is broken.
   { name: '10-combat', rotation: 0, zoom: 0, fight: true },
+  // Night, and the death report. Both are states the game spends real time in
+  // and neither was previously captured by anything.
+  { name: '11-night', rotation: 0, zoom: 3, hour: 1 },
+  { name: '12-death', rotation: 0, zoom: 2, death: true },
 ];
 
 const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
@@ -132,6 +136,21 @@ try {
       } else {
         window.__knox.__forceGait = null;
       }
+      // The player really does die during the combat shot, and the death card
+      // is modal — without clearing it, every later shot is a screenshot of it.
+      window.__knox.hud.el['hud-death'].classList.toggle('hidden', !s.death);
+
+      if (s.hour !== undefined) {
+        window.__knox.clock.elapsed =
+          Math.floor(window.__knox.clock.elapsed / 86400) * 86400 + s.hour * 3600;
+      }
+      if (s.death) {
+        window.__knox.hud.showDeath({
+          cause: 'Torn apart',
+          days: '3 days',
+          kills: window.__knox.combat.stats.kills,
+        });
+      }
       if (s.fight) {
         const { horde: hs, avatar: av } = window.__knox;
         const h = hs.horde;
@@ -214,7 +233,7 @@ try {
     // the camera settles shows the *previous* shot's readout.
     await page.evaluate(() => {
       const start = window.__knox.loop.frame;
-      window.__knox.__hudTarget = start + 20;
+      window.__knox.__hudTarget = start + 14;
     });
     await page.waitForFunction(() => window.__knox.loop.frame >= window.__knox.__hudTarget, {
       timeout: 5000,
