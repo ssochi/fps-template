@@ -155,7 +155,9 @@ export class Moodles {
    * @param {number} context.exertion 0 = still, 1 = sprinting
    * @param {number} context.threats zombies currently visible and close
    */
-  update(dt, gameDt, { indoors = false, daylight = 1, exertion = 0, threats = 0 } = {}) {
+  update(dt, gameDt, {
+    indoors = false, daylight = 1, exertion = 0, threats = 0, chill = 0, warmth = 0,
+  } = {}) {
     if (!this.body.alive) return;
 
     // Exertion burns food and water faster; this is why a long fight is
@@ -179,7 +181,7 @@ export class Moodles {
       }
     }
 
-    this._updateTemperature(gameDt, indoors, daylight);
+    this._updateTemperature(gameDt, indoors, daylight, chill, warmth);
     this._updatePanic(dt, threats, daylight);
 
     // Sickness is the visible face of infection, plus a contribution from being
@@ -193,10 +195,14 @@ export class Moodles {
     this._announceTiers();
   }
 
-  _updateTemperature(gameDt, indoors, daylight) {
-    // Ambient runs from cold at night to warm at midday; indoors is buffered.
-    const outdoor = 0.3 + daylight * 0.34;
-    const ambient = indoors ? 0.5 + (outdoor - 0.5) * 0.35 : outdoor;
+  _updateTemperature(gameDt, indoors, daylight, chill = 0, warmth = 0) {
+    // Ambient runs from cold at night to warm at midday; indoors is buffered,
+    // rain takes a bite out of it, and a fire puts it back.
+    const outdoor = 0.3 + daylight * 0.34 - (indoors ? chill * 0.3 : chill);
+    let ambient = indoors ? 0.5 + (outdoor - 0.5) * 0.35 : outdoor;
+    // A fire is the strongest thing in this equation on purpose: sitting next
+    // to one has to be the answer to being cold, or being cold has no answer.
+    ambient += warmth * 0.3;
     // The body equalises toward ambient over roughly half an hour.
     const k = 1 - Math.exp(-gameDt / 1800);
     this.temperature += (ambient - this.temperature) * k;

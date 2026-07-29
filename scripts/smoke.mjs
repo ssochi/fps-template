@@ -61,6 +61,10 @@ const SHOTS = [
   // after the grid fails — which is what M7's high night floor was waiting for.
   { name: '16-helicopter', rotation: 0, zoom: 3, helicopter: true },
   { name: '17-blackout', rotation: 0, zoom: 2, blackout: true },
+  // M18: the answer to the shutoff. A camp in the rain, at night, with the
+  // mains dead — a fire for warmth and light, a barrel filling, a generator
+  // running and shouting about it.
+  { name: '18-camp', rotation: 0, zoom: 0, camp: true },
 ];
 
 /**
@@ -382,6 +386,52 @@ try {
           state: meta.helicopter.state,
           sighted: meta.helicopter.sighted,
           x: meta.helicopter.x.toFixed(1),
+        };
+      }
+
+      if (s.camp) {
+        const {
+          avatar: av, stations, weather, meta, renderer: r, clock: ck,
+          town: t, isoCamera: cam, world: w,
+        } = window.__knox;
+        const cx = t.roads.vertical[1];
+        const cz = t.roads.horizontal[1];
+        av.level = 0;
+        av.position.set(cx + 0.5, 0, cz + 5.5);
+        av.syncLevelHeight();
+        av.setYaw(Math.PI * 0.25);
+        ck.elapsed = Math.floor(ck.elapsed / 86400) * 86400 + 3 * 3600;
+
+        // The mains are gone; this is what you built instead.
+        meta.utilities.power = false;
+        meta.utilities.water = false;
+        r.setPower(false);
+        r.power = 0;
+
+        // Storm, at full intensity — a screenshot is one frame and the ease
+        // takes half a minute.
+        weather.sky = 3;
+        weather.intensity = 1;
+        weather._target = 1;
+
+        const place = (x, z, id, kind) => {
+          w.grid.setObject(x, z, 0, id * 4);
+          return stations.add(x, z, 0, kind);
+        };
+        const fire = place(cx + 1, cz + 5, 25 /* CAMPFIRE */, 'fire');
+        stations.refuel(fire, 4);
+        const barrel = place(cx - 1, cz + 5, 24 /* RAIN_BARREL */, 'barrel');
+        barrel.water = 9;
+        const gen = place(cx + 1, cz + 7, 26 /* GENERATOR */, 'generator');
+        stations.refuel(gen, 6);
+        w.flushDirty(Infinity);
+
+        r.setFire(fire);
+        r.setGloom(weather.gloom);
+        cam.snapTo(av.position);
+        return {
+          lit: fire.lit, water: barrel.water, running: gen.running,
+          noise: weather.noiseScale.toFixed(2),
         };
       }
 

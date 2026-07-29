@@ -49,6 +49,25 @@ export class Hud {
      * time and stacked, because "the water goes off tomorrow" is something the
      * player has to remember rather than react to.
      */
+    // Weather and the things you built announce themselves through the same
+    // channel the emergency broadcasts use — one place on screen for "something
+    // happened that you did not do".
+    this._offWeather = events.on('weather:changed', ({ sky }) => {
+      const key = sky === 3 ? 'weather.storm.started'
+        : sky === 2 ? 'weather.rain.started' : 'weather.stopped';
+      const fallback = sky >= 2
+        ? 'Rain. It covers the noise you make.'
+        : 'The rain has stopped.';
+      this._broadcasts.push({ text: t(key, fallback), tone: 'normal', until: performance.now() + 9000 });
+      this._renderBroadcasts();
+    });
+    this._offStation = events.on('station:stopped', ({ kind }) => {
+      const key = kind === 'fire' ? 'station.fire.out' : 'station.generator.out';
+      const fallback = kind === 'fire' ? 'The fire has gone out.' : 'The generator is out of fuel.';
+      this._broadcasts.push({ text: t(key, fallback), tone: 'warning', until: performance.now() + 9000 });
+      this._renderBroadcasts();
+    });
+
     this._offBroadcast = events.on('meta:broadcast', ({ text, tone }) => {
       this._broadcasts.push({ text, tone, until: performance.now() + 14000 });
       if (this._broadcasts.length > 4) this._broadcasts.shift();
@@ -236,6 +255,8 @@ export class Hud {
     this._offWound();
     this._offDeath();
     this._offBroadcast?.();
+    this._offWeather?.();
+    this._offStation?.();
     this._offLevel();
   }
 }

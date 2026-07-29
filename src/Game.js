@@ -31,6 +31,8 @@ import { Panels } from './ui/Panels.js';
 import { LootSystem } from './items/Loot.js';
 import { Construction, Siege } from './sim/Construction.js';
 import { MetaEvents, UTILITY } from './sim/Meta.js';
+import { Weather } from './sim/Weather.js';
+import { Stations } from './sim/Stations.js';
 import { HelicopterMesh } from './render/HelicopterMesh.js';
 import { Skills, SKILL, WEAPON_SKILL, XP } from './sim/Skills.js';
 import { MOD, Profile } from './sim/Traits.js';
@@ -128,15 +130,24 @@ export function createGame({
   // Everything the player has faced so far is a reaction to something they did.
   // This is the first system that happens because time passed.
   const meta = new MetaEvents(world.grid, { seed });
+  const weather = new Weather(seed);
+  const stations = new Stations(world.grid);
   avatar.utilities = meta.utilities;
+  avatar.stations = stations;
   const heliMesh = new HelicopterMesh();
   renderer.scene.add(heliMesh.group);
 
   events.on('utility:failed', ({ id }) => {
-    if (id === UTILITY.POWER) renderer.setPower(false);
+    if (id === UTILITY.POWER) renderer.setPower(stations.powered);
   });
+  // A generator is the mains coming back, for as long as the petrol lasts.
+  for (const name of ['station:started', 'station:stopped']) {
+    events.on(name, ({ kind }) => {
+      if (kind === 'generator') renderer.setPower(meta.utilities.power || stations.powered);
+    });
+  }
 
-  const construction = new Construction(world.grid, avatar);
+  const construction = new Construction(world.grid, avatar, stations);
   // Blocked zombies work on whatever is in their way, so a barricade is a delay
   // rather than an off switch.
   const siege = new Siege(world.grid, horde.horde);
@@ -169,6 +180,10 @@ export function createGame({
     else audio.crack(wx, wz);
   });
   events.on('player:wounded', () => audio.hurt());
+  // Rain swallows noise. Applied here, at the one place the player's own
+  // loudness is already assembled, so the horde, the migration memory and the
+  // audio all get the quiet hour without any of them knowing about weather.
+  avatar.weather = weather;
 
   // Skills are awarded from the same events, so "you get better at what you do"
   // needs no bookkeeping at each call site.
@@ -350,6 +365,8 @@ export function createGame({
       // The metagame reads the calendar and emits into the same sound field
       // everything else does, so the horde reacts to a helicopter exactly as it
       // reacts to a hammer — with no special case anywhere.
+      weather.update(dt, clock);
+      stations.update(dt, gameDtPending, weather);
       meta.update(dt, gameDtPending, clock, {
         x: observer.x,
         z: observer.z,
@@ -390,6 +407,8 @@ export function createGame({
         daylight: clock.daylight,
         exertion: avatar.currentSpeed / 5,
         threats: horde.horde.stats.chasing,
+        chill: weather.chill,
+        warmth: stations.warmthAt(observer.x, observer.z, observer.level),
       });
       // Fatigue caps how much endurance you can hold at all.
       avatar.endurance = Math.min(avatar.endurance, moodles.enduranceCeiling);
@@ -413,6 +432,10 @@ export function createGame({
       isoCamera.update(frameTime, camFocus);
       renderer.setSun(clock.sunAngles(), clock.daylight);
       renderer.setTorch(avatar.position, avatar.torchOn && avatar.hasTorch);
+      renderer.setFire(stations.nearestFire(
+        Math.floor(avatar.position.x), Math.floor(avatar.position.z), avatar.level,
+      ));
+      renderer.setGloom(weather.gloom);
       renderer.stepPower(frameTime);
       heliMesh.sync(meta.helicopter);
 
@@ -505,7 +528,7 @@ export function createGame({
   const game = {
     world, town, renderer, isoCamera, loop, avatar, input, horde, combat,
     clock, moodles, hud, help, loot, panels, construction, siege, skills, audio,
-    meta, heliMesh,
+    meta, heliMesh, weather, stations,
     profile,
     seed,
     Save,

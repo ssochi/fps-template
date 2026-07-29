@@ -84,6 +84,32 @@ export const ITEMS = {
   plank: { id: 'plank', name: 'wooden plank', kind: KIND.MATERIAL, weight: 1.8, stack: 3 },
   sheet: { id: 'sheet', name: 'bed sheet', kind: KIND.MATERIAL, weight: 0.3, stack: 3 },
   bag: { id: 'bag', name: 'duffel bag', kind: KIND.CLOTHING, weight: 1.0 },
+
+  // --- M18 ------------------------------------------------------------
+  petrol: { id: 'petrol', name: 'can of petrol', kind: KIND.MATERIAL, weight: 3.2, stack: 2 },
+  /**
+   * Twenty-five kilograms, against a ten kilogram bag. You cannot carry a
+   * generator and anything else, which is the point: getting one home is a trip
+   * you make on purpose, slowly, with nothing in your hands.
+   */
+  generator: { id: 'generator', name: 'generator', kind: KIND.MATERIAL, weight: 25 },
+  /**
+   * Raw meat is food you cannot eat yet. It is the only item in the game whose
+   * nutrition is *negative* to eat as it is, which is what gives a campfire a
+   * job beyond warmth.
+   */
+  rawmeat: {
+    id: 'rawmeat', name: 'raw meat', kind: KIND.FOOD, weight: 0.5,
+    nutrition: 0.08, perishable: 30, raw: true, cooksTo: 'steak',
+  },
+  potato: {
+    id: 'potato', name: 'potato', kind: KIND.FOOD, weight: 0.25,
+    nutrition: 0.06, perishable: 400, raw: true, cooksTo: 'bakedpotato',
+  },
+  bakedpotato: {
+    id: 'bakedpotato', name: 'baked potato', kind: KIND.FOOD, weight: 0.22,
+    nutrition: 0.2, perishable: 60,
+  },
 };
 
 /**

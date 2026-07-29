@@ -113,6 +113,10 @@ export class Player extends Entity {
     this.moodles = null;
     /** Set by main. Lets `E` drink from a tap while the mains are still on. */
     this.utilities = null;
+    /** Set by main. Lets `E` use a barrel, a fire or a generator. */
+    this.stations = null;
+    /** Set by main. Rain covers the noise you make. */
+    this.weather = null;
     /** Whether the torch in the bag is lit. */
     this.torchOn = false;
 
@@ -317,6 +321,11 @@ export class Player extends Entity {
       return;
     }
 
+    // Anything built on a neighbouring tile: a barrel to drink from, a fire to
+    // feed, a generator to fuel. One key for all of them, because from the
+    // player's side "use the thing next to me" is a single intent.
+    if (this.stations && this._useStation(x, z)) return;
+
     // A tap, a cistern or a bath on this tile or the next one over. Placed
     // between doors and vaulting because it is the rarer intent of the two and
     // you are usually standing *on* the tile, not facing it.
@@ -338,6 +347,41 @@ export class Player extends Entity {
     if (this.grid.canClimb(x, z, x + v.dx, z + v.dz, this.level)) {
       this._beginVault(x + v.dx, z + v.dz);
     }
+  }
+
+  /**
+   * Use whatever is built next to you.
+   *
+   * Refuelling before drinking, because a survivor standing between a barrel
+   * and a dying fire almost certainly means the fire — the barrel is not going
+   * anywhere and the fire is.
+   *
+   * @returns {boolean} whether anything happened
+   */
+  _useStation(x, z) {
+    for (const state of this.stations.near(x, z, this.level, 1.5)) {
+      if (state.kind === 'fire' && this.inventory.countOf('plank') > 0) {
+        if (!this.stations.refuel(state, 1)) continue;
+        this.inventory.remove(this.inventory.find((i) => i.id === 'plank'), 1);
+        events.emit('station:fed', { kind: 'fire', x: state.x, z: state.z });
+        return true;
+      }
+      if (state.kind === 'generator' && this.inventory.countOf('petrol') > 0) {
+        if (!this.stations.refuel(state, 4)) continue;
+        this.inventory.remove(this.inventory.find((i) => i.id === 'petrol'), 1);
+        events.emit('station:fed', { kind: 'generator', x: state.x, z: state.z });
+        return true;
+      }
+      if (state.kind === 'barrel' && this.moodles) {
+        const hydration = this.stations.drink(state);
+        if (hydration > 0) {
+          this.moodles.drink(hydration);
+          events.emit('player:drank', { x: state.x, z: state.z, hydration });
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   _beginDoor({ x, z, open }) {
@@ -481,7 +525,13 @@ export class Player extends Entity {
    * Zombie and siege noise deliberately does not pass through here.
    */
   get noiseScale() {
-    return this.profile.mod(MOD.NOISE) * (this.skills?.noiseScale ?? 1);
+    return (
+      this.profile.mod(MOD.NOISE)
+      * (this.skills?.noiseScale ?? 1)
+      // Rain covers you. The loudest thing you can do is quietest in a storm,
+      // which makes the weather a thing you plan around rather than watch.
+      * (this.weather?.noiseScale ?? 1)
+    );
   }
 
   /** Metres per second the player would move right now, for the HUD. */

@@ -84,10 +84,15 @@ export class Renderer {
      * street, so carrying one changes *where* you can see rather than how far.
      */
     this._bufferSize = new Vector2(1, 1);
+    this._gloom = 0;
+    this._fireFlicker = 0;
     /** 1 while the grid is up, 0 once it has failed. Eased. */
     this.power = 1;
     this._powerTarget = 1;
     this.torch = new PointLight(0xffd9a0, 0, 9, 1.6);
+    /** A campfire. Warmer and further-reaching than a torch. */
+    this.fire = new PointLight(0xffb060, 0, 14, 1.7);
+    this.scene.add(this.fire);
     this.torch.castShadow = false; // a second shadow map for one lamp is not worth it
     this.scene.add(this.torch);
 
@@ -132,7 +137,9 @@ export class Renderer {
     // war already does. So the floor sits where silhouettes and doorways still
     // read. When torches and lamps exist this can come back down, because then
     // darkness will have an answer.
-    const dayness = Math.max(0, Math.min(1, daylight));
+    // Cloud takes light out of the sky before anything else does, so an
+    // overcast noon reads as an overcast noon rather than as dusk.
+    const dayness = Math.max(0, Math.min(1, daylight)) * (1 - this._gloom * 0.55);
 
     // The night floor, and what the power cut is *for*.
     //
@@ -160,12 +167,33 @@ export class Renderer {
    * Read by `setSun` above; the grid failing is a lighting change, not a new
    * light source.
    */
+  /**
+   * A lit campfire, or null. One pooled point light — a second fire further
+   * away is a glow you would not see anyway at this camera distance, and a
+   * light per fire is a shadow map per fire.
+   */
+  setFire(state) {
+    if (!state) {
+      this.fire.intensity = 0;
+      return;
+    }
+    this.fire.position.set(state.x + 0.5, state.level * 2.6 + 0.5, state.z + 0.5);
+    // Flickers, because a fire that does not is a lamp.
+    this.fire.intensity = 11 + Math.sin(this._fireFlicker) * 1.8;
+  }
+
+  /** How much light the cloud has taken out of the sky, 0–1. */
+  setGloom(gloom) {
+    this._gloom = Math.max(0, Math.min(1, gloom));
+  }
+
   setPower(on) {
     this._powerTarget = on ? 1 : 0;
   }
 
   /** Eased toward the target, so the lights go out over a few seconds. */
   stepPower(dt) {
+    this._fireFlicker += dt * 9;
     const k = 1 - Math.exp(-dt / 2.5);
     this.power += (this._powerTarget - this.power) * k;
   }

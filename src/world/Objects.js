@@ -42,6 +42,14 @@ export const OBJ = {
   CAR: 21,
   BIN: 22,
   LAMPPOST: 23,
+
+  // --- M18: things you build ------------------------------------------
+  /** Collects rain. The answer to the water shutoff. */
+  RAIN_BARREL: 24,
+  /** Warmth, light, and the only way to cook. */
+  CAMPFIRE: 25,
+  /** Mains power in one building, for as long as the petrol lasts. */
+  GENERATOR: 26,
 };
 
 /**
@@ -84,6 +92,10 @@ export const OBJECT_SPEC = {
   [OBJ.BUSH]: { name: 'bush', w: 0.75, d: 0.75, h: 1.0, color: 0x46603a },
   [OBJ.CAR]: { name: 'car', w: 0.95, d: 0.95, h: 1.4, color: 0x6b3f3d, solid: true, opaque: true, container: true },
   [OBJ.BIN]: { name: 'bin', w: 0.6, d: 0.6, h: 1.0, color: 0x4a5a4a, container: true },
+  [OBJ.RAIN_BARREL]: { name: 'rain barrel', w: 0.7, d: 0.7, h: 0.95, color: 0x4a5a55, solid: true, container: false },
+  [OBJ.CAMPFIRE]: { name: 'campfire', w: 0.8, d: 0.8, h: 0.28, color: 0x3a2f28 },
+  [OBJ.GENERATOR]: { name: 'generator', w: 0.7, d: 0.55, h: 0.6, color: 0x8a7326, solid: true },
+
   [OBJ.LAMPPOST]: { name: 'lamppost', w: 0.16, d: 0.16, h: 4.6, color: 0x4e5257, solid: true },
 };
 

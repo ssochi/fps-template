@@ -38,6 +38,14 @@ export function serialise(game) {
   // Doors, barricades and searched containers are sparse: a town has thousands
   // of cells and a handful of changes, so they are stored as index/value pairs
   // rather than as full arrays.
+  // Objects the *player* put down. Worldgen's furniture regenerates from the
+  // seed, so only the difference needs storing — and `Stations` already knows
+  // exactly which cells those are.
+  const placed = [];
+  for (const state of game.stations?.byCell.values() ?? []) {
+    placed.push(state.index, grid.object[state.index]);
+  }
+
   const doors = [];
   const barricades = [];
   for (let i = 0; i < grid.size; i++) {
@@ -71,6 +79,9 @@ export function serialise(game) {
     // *schedule* is derived from the seed, so only what has already happened
     // needs storing — three booleans and a list of announcements.
     meta: game.meta?.toJSON() ?? null,
+    // What has been built and how much is left in it. The objects themselves
+    // are already in the grid deltas; this is the running state.
+    stations: game.stations?.toJSON() ?? null,
     clock: { elapsed: clock.elapsed },
     player: {
       x: avatar.position.x,
@@ -101,7 +112,7 @@ export function serialise(game) {
     },
     skills: skills.toJSON(),
     stats: { kills: combat.stats.kills },
-    world: { doors, barricades, containers, dead },
+    world: { doors, barricades, containers, dead, placed },
   };
 }
 
@@ -149,7 +160,8 @@ export function restore(game, data, { Item, Container, WeaponInstance, Skills })
   if (game.profile) game.skills.rate = game.profile.mod('xpRate');
   avatar.skills = game.skills;
 
-  const { doors, barricades, containers, dead } = data.world;
+  const { doors, barricades, containers, dead, placed } = data.world;
+  for (let i = 0; i < (placed?.length ?? 0); i += 2) grid.object[placed[i]] = placed[i + 1];
   for (let i = 0; i < doors.length; i += 2) grid.state[doors[i]] = doors[i + 1];
   for (let i = 0; i < barricades.length; i += 5) {
     const index = barricades[i];
@@ -160,6 +172,7 @@ export function restore(game, data, { Item, Container, WeaponInstance, Skills })
   }
 
   game.meta?.fromJSON(data.meta);
+  game.stations?.fromJSON(data.stations);
   if (game.meta && !game.meta.utilities.power) game.renderer?.setPower(false);
 
   loot.opened.clear();

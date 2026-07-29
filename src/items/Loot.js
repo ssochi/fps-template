@@ -30,10 +30,10 @@ import { Rng } from '../core/Rng.js';
  */
 const TABLES = {
   kitchen: {
-    [OBJ.FRIDGE]: ['milk', 'milk', 'cheese', 'steak', 'apple', 'bread', 'soda', 'water'],
+    [OBJ.FRIDGE]: ['milk', 'milk', 'cheese', 'rawmeat', 'rawmeat', 'apple', 'bread', 'soda', 'water'],
     [OBJ.COUNTER]: ['beans', 'soup', 'crisps', 'chocolate', 'water', 'knife', 'rag'],
     [OBJ.STOVE]: ['soup', 'beans'],
-    [OBJ.SHELF]: ['beans', 'soup', 'water', 'crisps'],
+    [OBJ.SHELF]: ['beans', 'soup', 'water', 'crisps', 'potato', 'potato'],
   },
   bedroom: {
     [OBJ.WARDROBE]: ['sheet', 'sheet', 'bag', 'rag', 'chocolate'],
@@ -51,14 +51,16 @@ const TABLES = {
     [OBJ.SOFA]: ['crisps', 'chocolate'],
   },
   storage: {
-    [OBJ.SHELF]: ['nails', 'plank', 'hammer', 'axe', 'crowbar', 'torch'],
-    [OBJ.CRATE]: ['plank', 'plank', 'nails', 'bag', 'water'],
+    // A generator lives exactly where you would look for one, and weighs
+    // twenty-five kilograms — finding it is the easy half.
+    [OBJ.SHELF]: ['nails', 'plank', 'hammer', 'axe', 'crowbar', 'torch', 'petrol'],
+    [OBJ.CRATE]: ['plank', 'plank', 'nails', 'bag', 'water', 'petrol', 'generator'],
   },
   /** Outdoors and anything unclassified. */
   default: {
     [OBJ.BIN]: ['rag', 'plank', 'crisps'],
-    [OBJ.CAR]: ['crowbar', 'water', 'rag', 'bag'],
-    [OBJ.CRATE]: ['plank', 'nails', 'water'],
+    [OBJ.CAR]: ['crowbar', 'water', 'rag', 'bag', 'petrol'],
+    [OBJ.CRATE]: ['plank', 'nails', 'water', 'petrol'],
   },
 };
 

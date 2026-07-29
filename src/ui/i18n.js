@@ -147,6 +147,7 @@ const TABLES = {
     'skill.carpentry': '木工', 'skill.carpentry.effect': '路障强度与施工速度',
     'skill.scavenging': '搜刮', 'skill.scavenging.effect': '一个容器能翻出多少东西',
     'skill.firstAid': '急救', 'skill.firstAid.effect': '包扎的效果',
+    'skill.cooking': '烹饪', 'skill.cooking.effect': '一顿熟食能顶多少',
 
     // --- occupations --------------------------------------------------
     'job.unemployed': '无业',
@@ -205,6 +206,8 @@ const TABLES = {
     'item.knife': '菜刀', 'item.bat': '棒球棍', 'item.axe': '消防斧', 'item.crowbar': '撬棍',
     'item.torch': '手电筒', 'item.hammer': '锤子', 'item.nails': '一盒钉子',
     'item.plank': '木板', 'item.sheet': '床单', 'item.bag': '行李袋',
+    'item.petrol': '汽油桶', 'item.generator': '发电机',
+    'item.rawmeat': '生肉', 'item.potato': '土豆', 'item.bakedpotato': '烤土豆',
     'item.spoiled': '（腐坏）',
 
     // --- weapons ------------------------------------------------------
@@ -217,6 +220,28 @@ const TABLES = {
     'recipe.barricade': '钉路障',
     'recipe.make-torch': '临时手电',
     'recipe.salvage-planks': '拆下木板',
+    'recipe.cook-meat': '烤肉',
+    'recipe.bake-potato': '烤土豆',
+    'recipe.boil-water': '烧开水',
+    'recipe.rain-barrel': '搭一个接雨桶',
+    'recipe.campfire': '生一堆篝火',
+    'recipe.place-generator': '放下发电机',
+
+    // --- M18: weather and what you build against it -------------------
+    'object.rain barrel': '接雨桶', 'object.campfire': '篝火', 'object.generator': '发电机',
+    'weather.clear': '晴', 'weather.overcast': '阴',
+    'weather.rain': '下雨', 'weather.storm': '暴雨',
+    'weather.rain.started': '下雨了。雨声盖得住你弄出的动静。',
+    'weather.storm.started': '暴雨。这是干吵闹活儿最好的时候。',
+    'weather.stopped': '雨停了。',
+    'station.barrel.empty': '桶是空的。',
+    'station.barrel.drank': '你从接雨桶里舀水喝。',
+    'station.fire.fed': '你往火里添了木板。',
+    'station.fire.out': '火灭了。',
+    'station.generator.fuelled': '发电机加了油，启动了。',
+    'station.generator.out': '发电机没油停了。',
+    'craft.needFire': '需要旁边有一堆点着的火',
+    'craft.needWater': '需要旁边有水',
     'panel.held': '需持有',
     'panel.searchHint': '走到容器旁边按 Tab 搜刮。',
     'panel.hint': '点击物品可以移动，点击配方可以制作 · F 吃喝 · G 换武器 · H 治疗 · L 手电 · Tab 关闭',

@@ -31,6 +31,7 @@ export const SKILL = {
   CARPENTRY: 'carpentry',
   SCAVENGING: 'scavenging',
   FIRSTAID: 'firstAid',
+  COOKING: 'cooking',
 };
 
 /** What each skill does, so the effect is stated next to the name. */
@@ -42,6 +43,7 @@ export const SKILL_INFO = {
   [SKILL.CARPENTRY]: { name: 'Carpentry', effect: 'barricade strength and build speed' },
   [SKILL.SCAVENGING]: { name: 'Scavenging', effect: 'how much a container yields' },
   [SKILL.FIRSTAID]: { name: 'First Aid', effect: 'how well dressings work' },
+  [SKILL.COOKING]: { name: 'Cooking', effect: 'how much food a cooked meal is worth' },
 };
 
 /** Which skill a weapon trains. */
@@ -152,6 +154,11 @@ export class Skills {
     return 1 + this.level(SKILL.FIRSTAID) * 0.06;
   }
 
+  /** How much of a cooked meal you actually get. */
+  get cookQuality() {
+    return 1 + this.level(SKILL.COOKING) * 0.07;
+  }
+
   /** Everything the character sheet shows. */
   summary() {
     return Object.values(SKILL).map((id) => ({
@@ -187,4 +194,5 @@ export const XP = {
   craft: 6,
   search: 3.5,
   treat: 8,
+  cook: 7,
 };

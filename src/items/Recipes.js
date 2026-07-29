@@ -16,12 +16,20 @@
  * spend materials, get a result.
  */
 import { Item } from './ItemDb.js';
+import { OBJ } from '../world/Objects.js';
 
 /** What a recipe produces. */
 export const OUTPUT = {
   ITEM: 'item',
   /** Applied to a wall edge the player is facing. */
   BARRICADE: 'barricade',
+  /**
+   * Puts an object down on the tile in front of you.
+   *
+   * The third output kind, and the one that turns crafting from "make a thing
+   * to carry" into "change this place". Everything M18 adds is one of these.
+   */
+  PLACE: 'place',
 };
 
 /**
@@ -31,6 +39,8 @@ export const OUTPUT = {
  * @property {Record<string, number>} materials item id → count consumed
  * @property {string} output one of OUTPUT
  * @property {string} [itemId]  for OUTPUT.ITEM
+ * @property {number} [objectId] for OUTPUT.PLACE
+ * @property {boolean} [needsFire] refused unless a lit fire is within reach
  * @property {number} [count]
  * @property {number} [seconds] how long it takes, in real seconds
  * @property {number} [noise]   loudness while working
@@ -96,6 +106,76 @@ export const RECIPES = [
     description: 'Prise planks off the furniture. Needs a crowbar in hand.',
   },
 ];
+
+RECIPES.push(
+  {
+    id: 'cook-meat',
+    name: 'Cook meat',
+    materials: { rawmeat: 1 },
+    output: OUTPUT.ITEM,
+    itemId: 'steak',
+    count: 1,
+    seconds: 6,
+    noise: 2,
+    needsFire: true,
+    description: 'Raw meat is barely food. Cooked, it is most of a day.',
+  },
+  {
+    id: 'bake-potato',
+    name: 'Bake a potato',
+    materials: { potato: 1 },
+    output: OUTPUT.ITEM,
+    itemId: 'bakedpotato',
+    count: 1,
+    seconds: 5,
+    noise: 2,
+    needsFire: true,
+    description: 'Three times the food, for the price of standing still.',
+  },
+  {
+    id: 'boil-water',
+    name: 'Boil water',
+    materials: { rag: 0 },
+    output: OUTPUT.ITEM,
+    itemId: 'water',
+    count: 1,
+    seconds: 8,
+    noise: 2,
+    needsFire: true,
+    needsWater: true,
+    description: 'Fills a bottle from a barrel and boils it. Needs both.',
+  },
+  {
+    id: 'rain-barrel',
+    name: 'Build a rain barrel',
+    materials: { plank: 4, nails: 1 },
+    output: OUTPUT.PLACE,
+    objectId: OBJ.RAIN_BARREL,
+    seconds: 9,
+    noise: 14,
+    description: 'Fills when it rains. The only water that does not run out.',
+  },
+  {
+    id: 'campfire',
+    name: 'Lay a campfire',
+    materials: { plank: 2 },
+    output: OUTPUT.PLACE,
+    objectId: OBJ.CAMPFIRE,
+    seconds: 5,
+    noise: 4,
+    description: 'Warmth, light and the only way to cook. Feed it planks.',
+  },
+  {
+    id: 'place-generator',
+    name: 'Set down a generator',
+    materials: { generator: 1 },
+    output: OUTPUT.PLACE,
+    objectId: OBJ.GENERATOR,
+    seconds: 8,
+    noise: 10,
+    description: 'The lights come back on. So does every head in the street.',
+  },
+);
 
 export const RECIPE_BY_ID = Object.fromEntries(RECIPES.map((r) => [r.id, r]));
 

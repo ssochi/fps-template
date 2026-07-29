@@ -38,8 +38,8 @@ reasoning in [`blueprint.md` §8](./blueprint.md).
 | M15 | **X-ray** | ✅ Complete | 1 | 389 tests; screen-space occlusion cutaway — walls, roofs and furniture between the camera and you dissolve |
 | M16 | Metagame events & the shutoff clock | ✅ Complete | 4 | 411 tests; water and power fail on a seeded schedule, taps run dry, the helicopter hunts |
 | M17 | **Legible** | ✅ Complete | 4 | 422 tests; a face and a heading notch, the cutaway stops at the roof, occlusion decided by line of sight |
-| M18 | Water, fire and food | 🟡 Next | — | Rain collectors, campfires, cooking, generators |
-| M19 | Full carpentry | ⬜ Planned | — | Placeable furniture and storage, built walls, barricade repair |
+| M18 | Water, fire and food | ✅ Complete | 3 | 452 tests; seeded weather that masks your noise, rain barrels, campfires, cooking, generators |
+| M19 | Full carpentry | 🟡 Next | — | Placeable furniture and storage, built walls, barricade repair |
 | M20 | The world beyond houses | ⬜ Planned | — | Shops, warehouse, fuel station; loot tables per archetype |
 | M21 | Streaming & scale | ⬜ Planned | — | 300² map, chunked simulation, mesh streaming — **closes cycle 2** |
 

@@ -16,11 +16,16 @@
  * blocked by planks attacks them, and enough zombies for long enough get in.
  * A barricade buys time, and time is the only thing worth buying.
  */
-import { DIR_VEC } from '../core/constants.js';
+import { Vector3 } from 'three';
+import { DIR, DIR_VEC, worldToTile } from '../core/constants.js';
 import { WALL } from '../world/TileGrid.js';
+import { packObject } from '../world/Objects.js';
 import { BARRICADE, OUTPUT, canCraft, consumeMaterials, produce } from '../items/Recipes.js';
 import { events } from '../core/Events.js';
-import { worldToTile } from '../core/constants.js';
+import { STATION } from './Stations.js';
+import { t } from '../ui/i18n.js';
+
+const _forward = new Vector3();
 
 /** Damage a zombie does to planks per swing. */
 const ZOMBIE_PLANK_DAMAGE = 9;
@@ -34,12 +39,14 @@ export class Construction {
    * @param {import('../world/TileGrid.js').TileGrid} grid
    * @param {import('../entity/Player.js').Player} player
    */
-  constructor(grid, player) {
+  constructor(grid, player, stations = null) {
     this.grid = grid;
     this.player = player;
+    /** Set by the caller. Cooking and refuelling both need to know what is built. */
+    this.stations = stations;
     /** The job in progress, if any. */
     this.job = null;
-    this.stats = { crafted: 0, barricades: 0, broken: 0 };
+    this.stats = { crafted: 0, barricades: 0, broken: 0, placed: 0 };
   }
 
   /**
@@ -71,16 +78,63 @@ export class Construction {
     const check = canCraft(recipe, this.player.inventory, this.player.weapon.def);
     if (!check.ok) return `need ${check.missing.join(', ')}`;
 
+    // A cooking recipe needs somewhere to cook. Checked here rather than in
+    // `Recipes` because a recipe is a table row and knows nothing about where
+    // anybody is standing.
+    if (recipe.needsFire && !this._fireNear()) return t('craft.needFire', 'need a lit fire nearby');
+    if (recipe.needsWater && !this._waterNear()) return t('craft.needWater', 'need water nearby');
+
     let edge = null;
+    let spot = null;
     if (recipe.output === OUTPUT.BARRICADE) {
       edge = this.facingEdge();
       if (!edge) return 'face a window or doorway';
       const existing = this.grid.barricadeAt(edge.x, edge.z, this.player.level, edge.dir);
       if (existing && existing.planks >= BARRICADE.maxPlanks) return 'already barricaded';
+    } else if (recipe.output === OUTPUT.PLACE) {
+      spot = this.placementSpot();
+      if (!spot) return 'no room in front of you';
     }
 
-    this.job = { recipe, edge, remaining: recipe.seconds ?? 2, noiseTimer: 0 };
+    this.job = { recipe, edge, spot, remaining: recipe.seconds ?? 2, noiseTimer: 0 };
     return null;
+  }
+
+  /**
+   * Where a placed object would go: the tile ahead, or the one underfoot.
+   *
+   * Ahead first, because putting a barrel down *on yourself* and then being
+   * unable to move is a way to lose a run to the interface. Underfoot is the
+   * fallback for a corner you have backed into.
+   */
+  placementSpot() {
+    const p = this.player;
+    const t2 = p.tile();
+    const f = p.forward(_forward);
+    const dir = Math.abs(f.x) > Math.abs(f.z) ? (f.x > 0 ? 1 : 3) : f.z > 0 ? 2 : 0;
+    const v = DIR_VEC[dir];
+
+    for (const [x, z] of [[t2.x + v.dx, t2.z + v.dz], [t2.x, t2.z]]) {
+      if (!this.grid.isWalkable(x, z, p.level)) continue;
+      const i = this.grid.index(x, z, p.level);
+      if (this.grid.object[i] !== 0) continue;
+      return { x, z, level: p.level };
+    }
+    return null;
+  }
+
+  _fireNear() {
+    if (!this.stations) return false;
+    const t2 = this.player.tile();
+    return !!this.stations.fireNear(t2.x, t2.z, this.player.level, 1.6);
+  }
+
+  _waterNear() {
+    if (!this.stations) return false;
+    const t2 = this.player.tile();
+    return this.stations
+      .near(t2.x, t2.z, this.player.level, 1.6)
+      .some((s) => s.kind === 'barrel' && s.water >= 1);
   }
 
   cancel() {
@@ -121,6 +175,16 @@ export class Construction {
     // Re-check: the player may have used the materials mid-job.
     if (!canCraft(recipe, this.player.inventory, this.player.weapon.def).ok) return;
     consumeMaterials(recipe, this.player.inventory);
+
+    if (recipe.output === OUTPUT.PLACE && job.spot) {
+      const { x, z, level } = job.spot;
+      this.grid.setObject(x, z, level, packObject(recipe.objectId, DIR.N));
+      const kind = STATION[recipe.objectId];
+      if (kind) this.stations?.add(x, z, level, kind);
+      this.stats.placed++;
+      events.emit('built:object', { x, z, level, objectId: recipe.objectId, kind });
+      return;
+    }
 
     if (recipe.output === OUTPUT.BARRICADE && edge) {
       this.grid.addPlank(
