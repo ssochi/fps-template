@@ -88,11 +88,20 @@ export class Player extends Entity {
     // not on the screen. See `entity/Marker.js`.
     this.marker = new Marker();
     this.object.add(this.marker.group);
-    // The body draws after its own silhouette, so the silhouette only ever
-    // tests against the world.
+
+    // Order matters twice over here.
+    //
+    // The body must be stamped with its draw order *before* the silhouette is
+    // attached, because `attachTo` adds the ghosts as children — a traverse
+    // afterwards would stamp them too, put both at the same order, and leave
+    // three.js to sort a coplanar pair by distance. Which it did, and the
+    // screenshot showed a cyan survivor standing in plain sight.
     this.character.root.traverse((o) => {
       if (o.isMesh) o.renderOrder = CHARACTER_ORDER;
     });
+    // The silhouette is the animated body, drawn again where a wall is in
+    // front of it — see `Marker.attachTo`.
+    this.marker.attachTo(this.character);
 
     /** Body-part health, bleeding and infection. */
     this.body = new Body(this.profile);

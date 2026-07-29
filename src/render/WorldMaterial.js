@@ -142,14 +142,26 @@ const OCCLUDE_PARS = /* glsl */ `
 uniform vec3  uPlayerScreen;   // xy in drawing-buffer pixels, z in NDC depth
 uniform vec2  uOccludeRadius;  // inner (fully cut), outer (fully kept)
 uniform float uOccludeStrength;
+uniform vec2  uOccludeHeight;  // world Y: start of the fade, fully cut above
 
 float knoxOcclusionCut() {
   if ( uOccludeStrength < 0.001 || vOccludable < 0.5 ) return 0.0;
   // Only things in front of the player. The bias keeps the surface the player
   // is standing on, and anything level with them, out of it.
   if ( gl_FragCoord.z >= uPlayerScreen.z - 0.00002 ) return 0.0;
+
+  // …and only things *over their head*. This is the correction M17 made to
+  // M15: a circle that dissolves everything nearer than the player also
+  // dissolves the door and the window directly in front of them, and a facade
+  // you cannot read is not an improvement on a facade you cannot see past.
+  // What actually covers a survivor at this camera pitch is the roof and the
+  // top of the near wall, so that is all that goes.
+  float height = smoothstep( uOccludeHeight.x, uOccludeHeight.y, vWorldPos.y );
+  if ( height < 0.001 ) return 0.0;
+
   float d = length( gl_FragCoord.xy - uPlayerScreen.xy );
-  return uOccludeStrength * ( 1.0 - smoothstep( uOccludeRadius.x, uOccludeRadius.y, d ) );
+  return uOccludeStrength * height
+    * ( 1.0 - smoothstep( uOccludeRadius.x, uOccludeRadius.y, d ) );
 }
 `;
 
@@ -213,6 +225,7 @@ export function createWorldUniforms({ visibilityTexture, visWidth, visHeight, gr
     uFogStrength: { value: 1 },
     uPlayerScreen: { value: new Vector3(0, 0, 1) },
     uOccludeRadius: { value: new Vector2(40, 64) },
+    uOccludeHeight: { value: new Vector2(0, 1) },
     uOccludeStrength: { value: 1 },
   };
 }

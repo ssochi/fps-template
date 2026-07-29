@@ -116,10 +116,47 @@ export class Character {
     this.head.castShadow = true;
     this.hips.add(this.head);
 
+    // --- which way is this person facing? -------------------------------
+    //
+    // The rig shipped with a head that was a plain box, so the front and the
+    // back of a survivor were the same six-pixel silhouette and there was no
+    // way at all to tell which way they were pointing. That was reported as
+    // "the facing controls feel awkward", which it is not — the facing has
+    // always been correct, it was *invisible*, and no amount of control tuning
+    // would have fixed a body with no front.
+    //
+    // Three marks, all of them cheap, and all of them chosen because they read
+    // at a hundred pixels tall: hair that stops at the hairline instead of
+    // wrapping the whole skull, two dark eyes, and a collar. The horde shares
+    // this rig, so the dead get faces too — and, more usefully, a direction you
+    // can read before they reach you.
+
+    // Hair covers the crown and the back, and stops short of the face.
     const cap = new Mesh(new BoxGeometry(P.head.w + 0.02, 0.07, P.head.d + 0.02), hair);
     cap.position.y = headY + P.head.h / 2 - 0.02;
     cap.castShadow = true;
     this.hips.add(cap);
+
+    const backHair = new Mesh(new BoxGeometry(P.head.w + 0.02, P.head.h * 0.72, 0.045), hair);
+    backHair.position.set(0, headY + 0.01, P.head.d / 2);
+    this.hips.add(backHair);
+
+    // Forward is −Z, so the face is on the −Z side of the head.
+    const faceZ = -P.head.d / 2 - 0.011;
+    const eyeGeo = new BoxGeometry(0.055, 0.045, 0.02);
+    const eyeMaterial = new MeshLambertMaterial({ color: new Color(0x1d1a18) });
+    this.materials.push(eyeMaterial);
+    for (const side of [-1, 1]) {
+      const eye = new Mesh(eyeGeo, eyeMaterial);
+      eye.position.set(side * 0.055, headY + 0.025, faceZ);
+      this.hips.add(eye);
+    }
+
+    // A collar, so the *body* has a front as well as the head — at the widest
+    // zoom the head is three pixels and the torso is the only thing readable.
+    const collar = new Mesh(new BoxGeometry(P.torso.w * 0.62, 0.07, 0.03), eyeMaterial);
+    collar.position.set(0, P.torso.h - 0.05, -P.torso.d / 2 - 0.016);
+    this.hips.add(collar);
 
     const shoulderY = P.torso.h - 0.06;
     this.armL = segment(P.upperArm, shirt, this.hips, -P.shoulderX, shoulderY, 0);

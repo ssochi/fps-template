@@ -361,6 +361,9 @@ export function createGame({
       // Nothing may cover the player. Driven from here rather than from
       // `updateView` because it needs their world position, not their tile.
       world.updateOcclusion(avatar.position, isoCamera, renderer.bufferSize);
+      // …and the survivor's own silhouette, shown only while the world is
+      // actually in the way.
+      avatar.marker.setOccluded(world.isOccluded(observer, isoCamera));
       horde.update(dt, observer);
       combat.update(dt);
       construction.update(dt);

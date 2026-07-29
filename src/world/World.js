@@ -12,6 +12,7 @@ import { meshChunk } from './Mesher.js';
 import { CHUNK } from '../core/constants.js';
 import { FogOfWar } from '../render/FogOfWar.js';
 import { Cutaway } from '../render/Cutaway.js';
+import { hasLineOfSight } from '../sim/Sight.js';
 import {
   createWorldDepthMaterial,
   createWorldMaterial,
@@ -28,9 +29,31 @@ const OCCLUDE_EYE = 0.95;
  * narrow enough that it reads as a window onto a person rather than as the
  * building having been demolished.
  */
-const OCCLUDE_RADIUS = { inner: 1.5, outer: 2.6 };
+const OCCLUDE_RADIUS = { inner: 1.9, outer: 3.0 };
+
+/**
+ * How far above the survivor's feet the cutaway starts, in metres.
+ *
+ * M15 dissolved everything nearer to the camera than the player, and the first
+ * report back was that it dissolved the door and the window in front of them
+ * too — which is worse than the problem, because a facade you cannot read is
+ * less useful than one you cannot see past.
+ *
+ * A door is 2.05 m and a wall is 2.6 m, so the fade begins just above the door
+ * head — deliberately *above* it, not at it, so a doorway is never partly
+ * dissolved. There is a test asserting the gap. What gets taken is the roof, the storey above, and the top strip of the
+ * near wall — which at a 31 degree pitch is exactly the geometry that covers a
+ * standing body. Everything a player needs to *read* — doorways, windows,
+ * furniture, the dead — stays where it is.
+ */
+const OCCLUDE_HEIGHT = { from: 2.12, to: 2.55 };
 
 const _occludePoint = new Vector3();
+const _basisF = new Vector3();
+const _basisR = new Vector3();
+
+/** How far toward the camera the occlusion probe reaches, in tiles. */
+const OCCLUSION_PROBE = 6;
 
 export class World {
   /**
@@ -119,6 +142,38 @@ export class World {
       OCCLUDE_RADIUS.inner * pixelsPerMetre,
       OCCLUDE_RADIUS.outer * pixelsPerMetre,
     );
+    // Measured from the storey the survivor is standing on, so going upstairs
+    // takes the ceiling with them rather than the roof two floors up.
+    u.uOccludeHeight.value.set(
+      worldPosition.y + OCCLUDE_HEIGHT.from,
+      worldPosition.y + OCCLUDE_HEIGHT.to,
+    );
+  }
+
+  /**
+   * Is the observer hidden from the camera by the world?
+   *
+   * One line-of-sight cast, from the observer's tile to a tile a few steps
+   * toward the camera, using the same DDA the horde's eyes use. That is the
+   * whole occlusion test: exact, a handful of grid lookups, and — unlike a
+   * depth-buffer trick — it cannot disagree with itself between two shader
+   * programs.
+   *
+   * Six tiles is enough. At this pitch anything further away than that projects
+   * below the survivor's feet and cannot cover them.
+   *
+   * @param {{x:number,z:number,level:number}} observer tile coordinates
+   * @param {import('../render/IsoCamera.js').IsoCamera} isoCamera
+   */
+  isOccluded(observer, isoCamera) {
+    isoCamera.screenBasis(_basisF, _basisR);
+    // `forward` points away from the camera, so the camera is back along it.
+    const tx = Math.round(observer.x - _basisF.x * OCCLUSION_PROBE);
+    const tz = Math.round(observer.z - _basisF.z * OCCLUSION_PROBE);
+    if (!hasLineOfSight(this.grid, observer.x, observer.z, tx, tz, observer.level)) return true;
+    // …and a storey above counts too: a floor over your head hides you as
+    // surely as a wall in front of you, cutaway or no cutaway.
+    return this.grid.getFloor(observer.x, observer.z, observer.level + 1) !== 0;
   }
 
   /**

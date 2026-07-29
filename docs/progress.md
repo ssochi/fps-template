@@ -37,15 +37,15 @@ reasoning in [`blueprint.md` §8](./blueprint.md).
 | M14 | **Playable** | ✅ Complete | 4 | 380 tests; 中文 UI, controls screen, a marker you can find, facing follows travel, 260 → 90 zombies |
 | M15 | **X-ray** | ✅ Complete | 1 | 389 tests; screen-space occlusion cutaway — walls, roofs and furniture between the camera and you dissolve |
 | M16 | Metagame events & the shutoff clock | ✅ Complete | 4 | 411 tests; water and power fail on a seeded schedule, taps run dry, the helicopter hunts |
-| M17 | Water, fire and food | 🟡 Next | — | Rain collectors, campfires, cooking, generators |
-| M18 | Full carpentry | ⬜ Planned | — | Placeable furniture and storage, built walls, barricade repair |
-| M19 | The world beyond houses | ⬜ Planned | — | Shops, warehouse, fuel station; loot tables per archetype |
-| M20 | Vehicles | ⬜ Planned | — | Keys, hotwiring, fuel, parts, mobile storage |
+| M17 | **Legible** | ✅ Complete | 4 | 422 tests; a face and a heading notch, the cutaway stops at the roof, occlusion decided by line of sight |
+| M18 | Water, fire and food | 🟡 Next | — | Rain collectors, campfires, cooking, generators |
+| M19 | Full carpentry | ⬜ Planned | — | Placeable furniture and storage, built walls, barricade repair |
+| M20 | The world beyond houses | ⬜ Planned | — | Shops, warehouse, fuel station; loot tables per archetype |
 | M21 | Streaming & scale | ⬜ Planned | — | 300² map, chunked simulation, mesh streaming — **closes cycle 2** |
 
-**M22 opens cycle 3** as a fresh Exploration milestone. Two planned milestones
-were displaced by playtest feedback (M14 and M15) and two were folded into other
-work; farming and meta-progression move into cycle 3.
+**M22 opens cycle 3** as a fresh Exploration milestone. **Three** planned
+milestones were displaced by playtest feedback (M14, M15 and M17); vehicles,
+farming and meta-progression move into cycle 3.
 
 ## Notes on the process
 
@@ -56,6 +56,11 @@ work; farming and meta-progression move into cycle 3.
   7 → 4 as milestones shifted from building systems to connecting them. M16–M20
   build new systems; if they land in three passes, suspect the verification
   rather than celebrate the velocity.
+- **A clever trick that cannot be verified is worse than a plain one that can.**
+  M17 spent four attempts on a `depthFunc = GreaterDepth` silhouette that was
+  elegant, free, and wrong because two shader programs need not agree on depth
+  in the last bit. The line-of-sight replacement is six grid lookups, has five
+  tests, and worked immediately.
 - **The two-clock convention needs a test, not another paragraph.** M6's
   bleeding, M7's panic and M16's helicopter were all rates written against the
   wrong clock, and all three read as the feature being broken. Three milestone

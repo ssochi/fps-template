@@ -14,22 +14,24 @@
  *
  * Two pieces, both cheap:
  *
- *   - **A silhouette**, drawn with `depthFunc = GreaterDepth`. That is the whole
- *     trick: the shape is rendered *only where something is already in front of
- *     it*, so it is invisible when you can see the character and shows through
- *     the wall when you cannot. No occlusion test, no raycast, no per-frame
- *     logic — the depth buffer already knows the answer and this asks it.
+ *   - **A silhouette** of the survivor's own animated body, drawn over
+ *     everything, and shown only while a line-of-sight cast from them toward
+ *     the camera is blocked. See the note in the constructor for why this is
+ *     decided on the CPU rather than with a depth-function trick.
  *
  *   - **A ring on the ground**, always drawn. It reads as a shadow you can
  *     trust, and it is what makes a stationary character findable in a street
  *     full of identical bodies.
  *
- * Both are unlit `MeshBasicMaterial` on purpose: this is signage, not scenery,
- * and it must look the same at midnight as at noon.
+ *   - **A heading notch** on the ring. The marker is a child of the entity, so
+ *     it inherits the yaw for free.
+ *
+ * All unlit `MeshBasicMaterial` on purpose: this is signage, not scenery, and it
+ * must look the same at midnight as at noon.
  */
 import {
   BoxGeometry,
-  GreaterDepth,
+  CircleGeometry,
   Group,
   Mesh,
   MeshBasicMaterial,
@@ -39,12 +41,16 @@ import {
 /** The colour reserved for "this one is you". Nothing else in the world is cyan. */
 export const MARKER_COLOR = 0x7fd8ff;
 
+/** Draw order: world (0), body, then the silhouette straight over the top. */
+export const CHARACTER_ORDER = 1;
+export const MARKER_ORDER = 8;
+
 /**
- * Draw order. The world is 0 by default and the character is pushed to
- * {@link CHARACTER_ORDER}, so the silhouette sits between them.
+ * Cubic metres below which a body part is not worth an extra draw call in the
+ * silhouette. Keeps the torso, the head and the legs; drops the eyes, the
+ * collar and the forearms.
  */
-export const MARKER_ORDER = 1;
-export const CHARACTER_ORDER = 2;
+const MIN_SILHOUETTE_VOLUME = 0.006;
 
 export class Marker {
   constructor({ color = MARKER_COLOR } = {}) {
@@ -52,35 +58,32 @@ export class Marker {
     this.group.name = 'marker';
 
     // --- the silhouette -------------------------------------------------
-    // Two boxes rather than a copy of the eleven-part rig: through a wall you
-    // need to read *where a person is*, not what their elbows are doing, and
-    // two draw calls is the right price for that.
-    // Opaque on purpose. A transparent material lands in three.js's transparent
-    // pass, which runs after *everything* opaque — including the character
-    // itself — so the silhouette would test against the character's own limbs
-    // and show as slivers between them. Opaque plus an explicit `renderOrder`
-    // puts it between the world and the body: it sees the wall's depth and not
-    // its owner's.
+    //
+    // Drawn straight over everything, and shown only when the game says the
+    // survivor is actually hidden.
+    //
+    // M14 and M15 both tried to make the *depth buffer* answer "is this
+    // occluded", with `depthFunc = GreaterDepth` on a mesh sharing the body's
+    // geometry. It is a lovely trick and it does not survive contact: the ghost
+    // and the body are drawn by different shader programs, GLSL makes no
+    // promise that two programs computing the same transform agree in the last
+    // bit, and without `invariant gl_Position` the comparison goes either way
+    // per pixel. The result was a survivor painted cyan while standing in plain
+    // sight — with the render order provably correct, a matching material class
+    // and a polygon offset all failing to rescue it.
+    //
+    // The game already knows the answer. `sim/Sight.js` has cast rays across
+    // this grid since M4; casting one from the survivor toward the camera is a
+    // handful of tile lookups and it is *exact*. So the visibility is decided on
+    // the CPU, by the same code the horde uses to decide whether it can see you,
+    // and the shader does nothing clever at all.
     this.through = new MeshBasicMaterial({
       color,
-      depthFunc: GreaterDepth,
+      depthTest: false,
       depthWrite: false,
-      depthTest: true,
+      transparent: true,
+      opacity: 0.9,
     });
-
-    // Sized to sit *inside* the torso, above the gap between the legs. Anything
-    // lower shows through that gap, where there is no character geometry to
-    // hide it and the ground behind is further away — technically correct, and
-    // it reads as a glowing patch under a visible survivor.
-    const body = new Mesh(new BoxGeometry(0.34, 0.62, 0.22), this.through);
-    body.position.y = 1.16;
-    body.renderOrder = MARKER_ORDER;
-    this.group.add(body);
-
-    const head = new Mesh(new BoxGeometry(0.28, 0.28, 0.28), this.through);
-    head.position.y = 1.58;
-    head.renderOrder = MARKER_ORDER;
-    this.group.add(head);
 
     // --- the ring -------------------------------------------------------
     // Always visible, including through the floor you are standing on, because
@@ -88,7 +91,7 @@ export class Marker {
     this.ringMaterial = new MeshBasicMaterial({
       color,
       transparent: true,
-      opacity: 0.4,
+      opacity: 0.55,
       depthTest: false,
       depthWrite: false,
     });
@@ -99,6 +102,82 @@ export class Marker {
     this.group.add(ring);
 
     this.ring = ring;
+
+    // --- which way am I pointing? ---------------------------------------
+    // A notch on the ring, at the front. The marker group is a child of the
+    // entity, so this inherits the yaw for free and there is nothing to keep
+    // in sync. Between this and the character's face, heading is legible at
+    // every zoom step: the face reads up close, the notch reads when the
+    // survivor is thirty pixels tall.
+    const notch = new Mesh(new CircleGeometry(0.13, 3), this.ringMaterial);
+    notch.rotation.x = -Math.PI / 2;
+    // A three-segment circle is a triangle; this rotation points its apex at
+    // −Z, which is the convention `Entity.js` uses for forward.
+    notch.rotation.z = Math.PI / 2;
+    notch.position.set(0, 0.03, -0.52);
+    notch.renderOrder = 7;
+    this.group.add(notch);
+    this.notch = notch;
+  }
+
+  /**
+   * Give the silhouette the survivor's actual shape.
+   *
+   * M14 used two static boxes, on the reasoning that through a wall you need to
+   * read *where* a person is rather than what their elbows are doing. M17 made
+   * the cutaway stop at head height — correctly, so that doors and windows stay
+   * readable — and that promoted the silhouette from a fallback to the main way
+   * you see yourself behind a low wall. Two boxes is not enough for that job: a
+   * cyan slab tells you nothing about which way you are pointing or whether you
+   * are moving.
+   *
+   * So each large part of the rig gets a sibling mesh sharing its geometry,
+   * added as a *child* so it inherits the animated world matrix for free —
+   * there is nothing to keep in sync, and the silhouette walks, turns and
+   * staggers exactly as the body does.
+   *
+   * Only the parts that read at this size: torso, head, and the four leg
+   * segments. Eyes, collar and forearms would be six more draw calls spent on
+   * detail that is one pixel across.
+   *
+   * @param {import('./Character.js').Character} character
+   */
+  attachTo(character) {
+    // Collected first, attached second. Adding a ghost during the walk means
+    // `traverse` visits it, and a ghost shares its host's geometry — so it
+    // passes the same size test, gets a ghost of its own, and recurses until
+    // the stack gives out. Caught by every test in the suite at once.
+    const hosts = [];
+    character.root.traverse((o) => {
+      if (!o.isMesh) return;
+      const p = o.geometry.parameters;
+      if (!p || !p.width) return;
+      if (p.width * p.height * p.depth < MIN_SILHOUETTE_VOLUME) return;
+      hosts.push(o);
+    });
+
+    for (const host of hosts) {
+      const ghost = new Mesh(host.geometry, this.through);
+      ghost.renderOrder = MARKER_ORDER;
+      host.add(ghost);
+    }
+    this.parts = hosts.length;
+    this.ghosts = [];
+    for (const host of hosts) {
+      const ghost = host.children[host.children.length - 1];
+      if (ghost.material === this.through) this.ghosts.push(ghost);
+    }
+    this.setOccluded(false);
+    return hosts.length;
+  }
+
+  /**
+   * Show or hide the silhouette. Driven from the frame loop by a line-of-sight
+   * cast from the survivor toward the camera — see `World.isOccluded`.
+   */
+  setOccluded(occluded) {
+    this.occluded = occluded;
+    for (const ghost of this.ghosts ?? []) ghost.visible = occluded;
   }
 
   /** Fade the whole marker, so a dead player's marker can be turned off. */
@@ -109,6 +188,7 @@ export class Marker {
   dispose() {
     this.through.dispose();
     this.ringMaterial.dispose();
+    // Only the geometry this class made: the silhouette shares the character's.
     for (const child of this.group.children) child.geometry.dispose();
   }
 }
