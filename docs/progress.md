@@ -13,7 +13,7 @@ Cycle 1 (M0 – M10). An Exploration milestone opens each cycle.
 | M6 | Combat & injury | ✅ Complete | 5 | 176 tests; located damage, infection, corpses |
 | M7 | Survival simulation | ✅ Complete | 6 | 204 tests; clock, 7 moodles, HUD, death report |
 | M8 | Inventory & looting | ✅ Complete | 4 | 240 tests; weight-based, room-keyed lazy loot |
-| M9 | Crafting & base building | 🟡 Next | – | |
-| M10 | Progression & polish | ⬜ Not started | – | |
+| M9 | Crafting & base building | ✅ Complete | 4 | 262 tests; destructible barricades, torch, recipes |
+| M10 | Progression & polish | 🟡 Next | – | closes cycle 1 |
 
 Cycle 2 opens at M11 with a fresh Exploration milestone.

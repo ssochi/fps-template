@@ -20,6 +20,7 @@ import { Moodles } from './sim/Moodles.js';
 import { Hud } from './ui/Hud.js';
 import { Panels } from './ui/Panels.js';
 import { LootSystem } from './items/Loot.js';
+import { Construction, Siege } from './sim/Construction.js';
 import { Item } from './items/ItemDb.js';
 import { events } from './core/Events.js';
 import { STOREY, tileToWorld } from './core/constants.js';
@@ -62,6 +63,13 @@ const hud = new Hud();
 const roomPurposes = new Map(town.rooms.map((r) => [r.id, r.purpose]));
 const loot = new LootSystem(world.grid, 'knox-county', roomPurposes);
 const panels = new Panels(avatar.inventory);
+panels.player = avatar;
+
+const construction = new Construction(world.grid, avatar);
+// Blocked zombies work on whatever is in their way, so a barricade is a delay
+// rather than an off switch.
+const siege = new Siege(world.grid, horde.horde);
+panels.construction = construction;
 
 // Something to start with, so the first minute is not spent hungry and unarmed.
 avatar.inventory.add(new Item('water'));
@@ -73,9 +81,14 @@ canvas.addEventListener('pointerdown', (e) => {
   e.stopPropagation();
 });
 panels.el.addEventListener('pointerdown', (e) => {
-  const move = panels.resolveClick(e.target);
-  if (!move) return;
-  move.from.transferTo(move.to, move.item, move.item.count);
+  const action = panels.resolveClick(e.target);
+  if (!action) return;
+  if (action.recipe) {
+    const reason = construction.begin(action.recipe);
+    if (!reason) panels.close();
+    return;
+  }
+  action.from.transferTo(action.to, action.item, action.item.count);
   panels.invalidate();
 });
 
@@ -157,7 +170,15 @@ const loop = new Loop({
           panels.invalidate();
         }
       }
+      if (input.wasPressed(ACTION.TREAT)) {
+        const kit = avatar.inventory.find((i) => i.def.stopsBleeding || i.id === 'painkillers');
+        if (kit) {
+          avatar.useMedical(kit);
+          panels.invalidate();
+        }
+      }
     }
+    if (input.wasPressed(ACTION.TORCH)) avatar.toggleTorch();
 
     if (!paused && !panels.open) {
       updateAim();
@@ -202,6 +223,8 @@ const loop = new Loop({
     world.updateView(dt, observer, isoCamera);
     horde.update(dt, observer);
     combat.update(dt);
+    construction.update(dt);
+    siege.update(dt, horde.flow);
 
     // One clock, advanced in one place. Bleeding is felt in real seconds;
     // hunger and infection are measured in days, so Body and Moodles are handed
@@ -232,6 +255,7 @@ const loop = new Loop({
     camFocus.set(avatar.position.x, avatar.level * STOREY + 0.9, avatar.position.z);
     isoCamera.update(frameTime, camFocus);
     renderer.setSun(clock.sunAngles(), clock.daylight);
+    renderer.setTorch(avatar.position, avatar.torchOn && avatar.hasTorch);
     renderer.updateLights(camFocus);
     horde.render(loop.elapsed);
     renderer.render();
@@ -249,7 +273,12 @@ const loop = new Loop({
           `${horde.horde.stats.alive} alive · ${horde.horde.stats.dead} down · ` +
           `${horde.horde.stats.chasing} chasing · ${combat.stats.kills} killed\n` +
           `carrying ${avatar.inventory.weight.toFixed(1)}kg · ` +
-          `${loot.stats.generated} containers searched`,
+          `${loot.stats.generated} searched · ${construction.stats.barricades} barricades\n` +
+          (construction.job
+            ? `${construction.job.recipe.name} ${(construction.progress * 100).toFixed(0)}%`
+            : siege.stats.breaches
+              ? `${siege.stats.breaches} breach(es)`
+              : ''),
       });
     }
   },
@@ -273,5 +302,5 @@ function nearbyContainer() {
 
 window.__knox = {
   world, town, renderer, isoCamera, loop, avatar, input, horde, combat,
-  clock, moodles, hud, loot, panels,
+  clock, moodles, hud, loot, panels, construction, siege,
 };

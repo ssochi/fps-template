@@ -245,6 +245,12 @@ export function meshChunk(grid, cx, cz, level) {
         emitWall(b, ww, x, z, level, baseY, false, grid.room[i], grid.getRoom(x - 1, z, level));
       }
 
+      // --- barricades ---
+      // Drawn from the plank count, not the remaining health, so a half-smashed
+      // barricade still reads as four planks with two broken off it.
+      if (grid.barricadeN[i] > 0) emitBarricade(b, grid, i, x, z, level, baseY, true);
+      if (grid.barricadeW[i] > 0) emitBarricade(b, grid, i, x, z, level, baseY, false);
+
       // --- objects ---
       const packed = grid.object[i];
       if (packed !== OBJ.NONE) {
@@ -431,6 +437,41 @@ function emitDoor(b, packed, x, z, level, baseY, state, room) {
     } else {
       const z0 = z + (1 - leaf) / 2;
       box(b, xc - thick / 2, baseY, z0, xc + thick / 2, baseY + h, z0 + leaf, rgb, level, room);
+    }
+  }
+}
+
+/**
+ * Planks nailed across an opening.
+ *
+ * Each plank is a slat at its own height and a slight angle, because a tidy
+ * grid of parallel boards reads as a fence rather than as something improvised
+ * in a hurry. Broken planks are simply not drawn, so the gap you can see through
+ * is the gap the dead are coming through.
+ */
+function emitBarricade(b, grid, i, x, z, level, baseY, isNorth) {
+  const planks = isNorth ? grid.barricadeN[i] : grid.barricadeW[i];
+  const hp = isNorth ? grid.barricadeHpN[i] : grid.barricadeHpW[i];
+  if (planks <= 0) return;
+
+  // How many are still whole, from the health that is left.
+  const perPlank = 60;
+  const intact = Math.max(1, Math.ceil(hp / perPlank));
+  const wood = [0.44, 0.33, 0.2];
+  const thick = 0.07;
+
+  for (let p = 0; p < planks; p++) {
+    if (p >= intact) continue;
+    const y = baseY + 0.45 + p * 0.42;
+    // Alternate the tilt so no two neighbouring boards line up.
+    const tilt = (p % 2 === 0 ? 1 : -1) * 0.06;
+
+    if (isNorth) {
+      const zc = z * TILE;
+      box(b, x - 0.05, y + tilt, zc - thick, x + 1.05, y + 0.16 + tilt, zc + thick, wood, level, 0);
+    } else {
+      const xc = x * TILE;
+      box(b, xc - thick, y + tilt, z - 0.05, xc + thick, y + 0.16 + tilt, z + 1.05, wood, level, 0);
     }
   }
 }

@@ -8,6 +8,7 @@
  */
 import {
   ACESFilmicToneMapping,
+  PointLight,
   HemisphereLight,
   Color,
   DirectionalLight,
@@ -73,6 +74,18 @@ export class Renderer {
     /** 0 = night, 1 = noon. Set from the clock each frame. */
     this.daylight = 1;
 
+    /**
+     * The player's torch.
+     *
+     * The only local light source in the game, and the reason night can have a
+     * lower floor than it does: with a torch, darkness has an answer. It is
+     * deliberately short-ranged — it shows you the room you are in, not the
+     * street, so carrying one changes *where* you can see rather than how far.
+     */
+    this.torch = new PointLight(0xffd9a0, 0, 9, 1.6);
+    this.torch.castShadow = false; // a second shadow map for one lamp is not worth it
+    this.scene.add(this.torch);
+
     this.setSize(window.innerWidth, window.innerHeight);
   }
 
@@ -120,6 +133,16 @@ export class Renderer {
     this.fill.intensity = MOOD.fillIntensity * (0.46 + dayness * 0.54);
     this.fill.color.setHex(dayness > 0.35 ? MOOD.fillSky : MOOD.fillNight);
     this.scene.background.setHex(dayness > 0.35 ? MOOD.sky : MOOD.skyNight);
+  }
+
+  /**
+   * Move and dim the player's torch. Off during the day, since a torch that
+   * does nothing visible but still costs a draw is just confusing.
+   */
+  setTorch(position, on) {
+    const strength = on ? Math.max(0, 1 - this.daylight * 1.4) : 0;
+    this.torch.intensity = strength * 14;
+    if (strength > 0) this.torch.position.set(position.x, position.y + 1.3, position.z);
   }
 
   /**

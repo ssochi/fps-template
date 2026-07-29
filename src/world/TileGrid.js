@@ -116,6 +116,19 @@ export class TileGrid {
     /** Runtime state of the object in each cell — see STATE. */
     this.state = new Uint8Array(n);
 
+    /**
+     * Barricades, stored on the same north/west edges as the walls they cover.
+     *
+     * `planks` is how many are nailed across the opening — it sets the maximum
+     * health and is what the mesher draws. `hp` is what is left of them. Keeping
+     * them separate means a half-broken barricade still *looks* like four planks
+     * with two smashed, rather than silently becoming a smaller barricade.
+     */
+    this.barricadeN = new Uint8Array(n);
+    this.barricadeW = new Uint8Array(n);
+    this.barricadeHpN = new Uint8Array(n);
+    this.barricadeHpW = new Uint8Array(n);
+
     this.chunksX = Math.ceil(width / CHUNK);
     this.chunksZ = Math.ceil(depth / CHUNK);
     /** Chunks needing a mesh rebuild, as packed chunk keys. */
@@ -228,6 +241,7 @@ export class TileGrid {
   /** Can something climb from one cell to an adjacent one (fence, window)? */
   canClimb(x1, z1, x2, z2, level) {
     if (!this.inBounds(x2, z2, level)) return false;
+    if (this.isBarricaded(x1, z1, x2, z2, level)) return false;
     const to = this.idx(x2, z2, level);
     if (this.floor[to] === FLOOR.VOID || this.flags[to] & FLAG.SOLID) return false;
     return CLIMBABLE_WALLS.has(this.wallBetween(x1, z1, x2, z2, level));
@@ -237,6 +251,9 @@ export class TileGrid {
   blocksSight(x1, z1, x2, z2, level) {
     if (!this.inBounds(x2, z2, level)) return true;
     if (this.flags[this.idx(x2, z2, level)] & FLAG.OPAQUE) return true;
+    // Planks block sight as well as movement — that is half of why you put
+    // them up, and it works both ways: you cannot see out either.
+    if (this.isBarricaded(x1, z1, x2, z2, level)) return true;
     const wall = this.wallBetween(x1, z1, x2, z2, level);
     // An open door is a hole you can see through; a shut one is a wall.
     if (wall === WALL.DOORWAY) return !this.isDoorOpen(x1, z1, x2, z2, level);
@@ -276,6 +293,89 @@ export class TileGrid {
     return true;
   }
 
+  // --- barricades -------------------------------------------------------
+
+  /**
+   * Planks across a given side of a cell, resolving the north/west storage rule
+   * exactly as `wallAt` does.
+   * @returns {{ planks: number, hp: number, index: number, side: 'N'|'W' } | null}
+   */
+  barricadeAt(x, z, level, dir) {
+    let ox = x;
+    let oz = z;
+    let side;
+    if (dir === DIR.N) side = 'N';
+    else if (dir === DIR.W) side = 'W';
+    else if (dir === DIR.S) {
+      oz = z + 1;
+      side = 'N';
+    } else {
+      ox = x + 1;
+      side = 'W';
+    }
+    const i = this.index(ox, oz, level);
+    if (i < 0) return null;
+    const planks = side === 'N' ? this.barricadeN[i] : this.barricadeW[i];
+    const hp = side === 'N' ? this.barricadeHpN[i] : this.barricadeHpW[i];
+    return { planks, hp, index: i, side };
+  }
+
+  /** Barricade on the edge between two adjacent cells, or null. */
+  barricadeBetween(x1, z1, x2, z2, level) {
+    const dx = x2 - x1;
+    const dz = z2 - z1;
+    if (dx === 0 && dz === -1) return this.barricadeAt(x1, z1, level, DIR.N);
+    if (dx === 0 && dz === 1) return this.barricadeAt(x1, z1, level, DIR.S);
+    if (dx === 1 && dz === 0) return this.barricadeAt(x1, z1, level, DIR.E);
+    if (dx === -1 && dz === 0) return this.barricadeAt(x1, z1, level, DIR.W);
+    return null;
+  }
+
+  /** True when planks are still holding on this edge. */
+  isBarricaded(x1, z1, x2, z2, level) {
+    const b = this.barricadeBetween(x1, z1, x2, z2, level);
+    return !!b && b.hp > 0;
+  }
+
+  /**
+   * Nail a plank across an edge.
+   * @returns {boolean} whether it went on
+   */
+  addPlank(x, z, level, dir, hpPerPlank, maxPlanks) {
+    const b = this.barricadeAt(x, z, level, dir);
+    if (!b || b.planks >= maxPlanks) return false;
+    const arr = b.side === 'N' ? this.barricadeN : this.barricadeW;
+    const hpArr = b.side === 'N' ? this.barricadeHpN : this.barricadeHpW;
+    arr[b.index] = b.planks + 1;
+    hpArr[b.index] = Math.min(255, b.hp + hpPerPlank);
+    this._dirtyEdge(x, z, level, dir);
+    return true;
+  }
+
+  /**
+   * Damage a barricade.
+   * @returns {boolean} whether it broke open on this hit
+   */
+  damageBarricade(x1, z1, x2, z2, level, amount) {
+    const b = this.barricadeBetween(x1, z1, x2, z2, level);
+    if (!b || b.hp <= 0) return false;
+    const hpArr = b.side === 'N' ? this.barricadeHpN : this.barricadeHpW;
+    const arr = b.side === 'N' ? this.barricadeN : this.barricadeW;
+    const left = Math.max(0, b.hp - amount);
+    hpArr[b.index] = left;
+    if (left === 0) arr[b.index] = 0;
+    this.markDirty(x1, z1, level);
+    this.markDirty(x2, z2, level);
+    return left === 0;
+  }
+
+  /** Mark both cells either side of an edge dirty. */
+  _dirtyEdge(x, z, level, dir) {
+    this.markDirty(x, z, level);
+    const v = DIR_VEC[dir];
+    this.markDirty(x + v.dx, z + v.dz, level);
+  }
+
   /**
    * Can something *actually* move between two cells right now?
    *
@@ -287,6 +387,8 @@ export class TileGrid {
    */
   canPass(x1, z1, x2, z2, level) {
     if (!this.canWalk(x1, z1, x2, z2, level)) return false;
+    // Planks stop you whatever is behind them.
+    if (this.isBarricaded(x1, z1, x2, z2, level)) return false;
     if (this.wallBetween(x1, z1, x2, z2, level) !== WALL.DOORWAY) return true;
     return this.isDoorOpen(x1, z1, x2, z2, level);
   }

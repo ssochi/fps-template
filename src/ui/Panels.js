@@ -10,6 +10,7 @@
  * thing on it and it turns colour before it turns into a problem.
  */
 import { events } from '../core/Events.js';
+import { RECIPES, canCraft } from '../items/Recipes.js';
 
 export class Panels {
   /**
@@ -18,6 +19,9 @@ export class Panels {
    */
   constructor(inventory, root = document.getElementById('hud')) {
     this.inventory = inventory;
+    /** Set by main, so the crafting list can show what is and is not possible. */
+    this.player = null;
+    this.construction = null;
     /** @type {import('../items/Container.js').Container | null} */
     this.container = null;
     this.open = false;
@@ -80,8 +84,28 @@ export class Panels {
         </header>
         ${this.container ? this._list(this.container, 'con') : '<div class="empty">Stand at a container and press E.</div>'}
       </div>
-      <div class="hint">Click an item to move it · F to eat or drink · G to equip · Tab or Esc to close</div>
+      <div class="panel craft">
+        <header>Craft</header>
+        ${this._recipes()}
+      </div>
+      <div class="hint">Click an item to move it or a recipe to make it · F eat · G equip · H treat · L torch · Tab close</div>
     `;
+  }
+
+  /** The recipe list, greyed where materials are missing. */
+  _recipes() {
+    if (!this.player) return '<div class="empty">—</div>';
+    const held = this.player.weapon?.def ?? {};
+    return `<ul>${RECIPES.map((r, i) => {
+      const check = canCraft(r, this.inventory, held);
+      const cost = Object.entries(r.materials)
+        .map(([id, n]) => (n === 0 ? `${id} (held)` : `${id}×${n}`))
+        .join(', ');
+      return (
+        `<li class="${check.ok ? '' : 'blocked'}" data-recipe="${i}" title="${r.description}">` +
+        `<span>${r.name}</span><em>${cost}</em></li>`
+      );
+    }).join('')}</ul>`;
   }
 
   _list(container, side) {
@@ -106,6 +130,9 @@ export class Panels {
    * @returns {{ item: import('../items/ItemDb.js').Item, from: object, to: object } | null}
    */
   resolveClick(target) {
+    const recipeLi = target.closest?.('li[data-recipe]');
+    if (recipeLi) return { recipe: RECIPES[Number(recipeLi.dataset.recipe)] };
+
     const li = target.closest?.('li[data-side]');
     if (!li) return null;
     const side = li.dataset.side;
@@ -130,7 +157,7 @@ export class Panels {
 const CSS = `
 #panels {
   position: absolute; inset: 0; display: grid; pointer-events: auto;
-  grid-template-columns: 1fr 1fr; grid-template-rows: 1fr auto;
+  grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr auto;
   gap: 14px; padding: 8vh 12vw 6vh; align-content: center;
   background: rgba(6,8,11,.72); backdrop-filter: blur(2px);
   font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: #cfd6dd;
@@ -158,4 +185,7 @@ const CSS = `
 #panels .empty { opacity: .35; padding: 6px; }
 #panels .warn { color: #c94a4a; margin-top: 8px; font-size: 11px; }
 #panels .hint { grid-column: 1 / -1; text-align: center; opacity: .4; font-size: 11px; }
+#panels li.blocked { opacity: .32; cursor: default; }
+#panels li.blocked:hover { background: none; }
+#panels .craft li em { font-size: 10px; }
 `;

@@ -29,6 +29,8 @@ export const ACTION = {
   INVENTORY: 'inventory',
   CONSUME: 'consume',
   EQUIP: 'equip',
+  TREAT: 'treat',
+  TORCH: 'torch',
 };
 
 const DEFAULT_BINDINGS = {
@@ -55,6 +57,8 @@ const DEFAULT_BINDINGS = {
   Escape: ACTION.INVENTORY,
   KeyF: ACTION.CONSUME,
   KeyG: ACTION.EQUIP,
+  KeyH: ACTION.TREAT,
+  KeyL: ACTION.TORCH,
 };
 
 export class Input {

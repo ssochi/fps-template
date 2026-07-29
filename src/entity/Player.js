@@ -76,6 +76,8 @@ export class Player extends Entity {
     this.inventory = new Inventory(10);
     /** Set by main once Moodles exists; injuries and moodles both slow you. */
     this.moodles = null;
+    /** Whether the torch in the bag is lit. */
+    this.torchOn = false;
 
     /** 0–1. Depletes when sprinting, recovers slowly. */
     this.endurance = 1;
@@ -330,6 +332,17 @@ export class Player extends Entity {
   /** Apply a bandage or first aid kit to whatever is worst. */
   useMedical(item) {
     const def = item.def;
+
+    // Painkillers do not mend anything; they take the pain away for a while,
+    // which is a real decision because pain is what is slowing your legs and
+    // spoiling your swing.
+    if (item.id === 'painkillers') {
+      this.body.pain = Math.max(0, this.body.pain - 45);
+      this.inventory.remove(item, 1);
+      events.emit('player:treated', { part: -1, id: item.id });
+      return true;
+    }
+
     if (!def.stopsBleeding && !def.heal) return false;
 
     // Treat the part that is actually in trouble, not a menu selection: the
@@ -350,6 +363,23 @@ export class Player extends Entity {
     this.inventory.remove(item, 1);
     events.emit('player:treated', { part: worst, id: item.id });
     return true;
+  }
+
+  /** Is there a torch in the bag to light? */
+  get hasTorch() {
+    return this.inventory.countOf('torch') > 0;
+  }
+
+  toggleTorch() {
+    if (!this.hasTorch) {
+      this.torchOn = false;
+      return false;
+    }
+    this.torchOn = !this.torchOn;
+    // Light is not free: it is the loudest thing you can do without a hammer,
+    // in the sense that it is the most visible.
+    events.emit('torch:toggled', { on: this.torchOn });
+    return this.torchOn;
   }
 
   /** Metres per second the player would move right now, for the HUD. */

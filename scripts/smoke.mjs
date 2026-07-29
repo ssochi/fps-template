@@ -47,7 +47,9 @@ const SHOTS = [
   { name: '11-night', rotation: 0, zoom: 3, hour: 1 },
   // Looting: the panels open over a container with something in it.
   { name: '12-looting', rotation: 0, zoom: 1, loot: true },
-  { name: '13-death', rotation: 0, zoom: 2, death: true },
+  // A barricaded window with the dead working on it, at night with a torch lit.
+  { name: '13-siege', rotation: 0, zoom: 0, siege: true },
+  { name: '14-death', rotation: 0, zoom: 2, death: true },
 ];
 
 const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
@@ -173,6 +175,48 @@ try {
           return { container: found.container.name, items: found.container.items.length };
         }
         return { container: 'none found', items: 0 };
+      }
+
+      if (s.siege) {
+        const { avatar: av, world: w, town: t, horde: hs, clock: ck } = window.__knox;
+        const g = w.grid;
+        const b = t.buildings.find((x) => x.rect.w >= 8) ?? t.buildings[0];
+        // Stand just inside the front door and plank the whole facade.
+        const ex = b.entrance.x;
+        const ez = b.entrance.z;
+        av.level = 0;
+        av.position.set(ex + 0.5, 0, ez + 1.5);
+        av.syncLevelHeight();
+        av.setYaw(Math.PI);
+        av.torchOn = true;
+        av.inventory.add(new (window.__knox.avatar.inventory.items[0].constructor)('torch'));
+
+        let planked = 0;
+        for (let x = b.rect.x; x < b.rect.x + b.rect.w; x++) {
+          for (const dir of [0, 2]) {
+            const wall = g.wallAt(x, dir === 0 ? b.rect.z : b.rect.z + b.rect.d - 1, 0, dir);
+            if (wall === 5 || wall === 6) {
+              for (let n = 0; n < 3; n++) {
+                if (g.addPlank(x, dir === 0 ? b.rect.z : b.rect.z + b.rect.d - 1, 0, dir, 60, 4)) planked++;
+              }
+            }
+          }
+        }
+        w.flushDirty(Infinity);
+
+        // Bring the dead to the door and set them working on it.
+        let brought = 0;
+        for (let i = 0; i < hs.horde.count && brought < 12; i++) {
+          hs.horde.x[i] = ex + 0.5 + (brought % 4) - 1.5;
+          hs.horde.z[i] = ez - 1.5 - Math.floor(brought / 4);
+          hs.horde.level[i] = 0;
+          hs.horde.state[i] = 3;
+          hs.horde.health[i] = 100;
+          brought++;
+        }
+        ck.elapsed = Math.floor(ck.elapsed / 86400) * 86400 + 2 * 3600;
+        isoCamera.snapTo(av.position);
+        return { planked, brought };
       }
 
       if (s.hour !== undefined) {
