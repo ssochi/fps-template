@@ -12,6 +12,7 @@ import { ACTION, Input } from './core/Input.js';
 import { World } from './world/World.js';
 import { generateTown } from './worldgen/Town.js';
 import { Player } from './entity/Player.js';
+import { HordeSystem } from './sim/HordeSystem.js';
 import { STOREY, tileToWorld } from './core/constants.js';
 
 const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('app'));
@@ -34,6 +35,10 @@ avatar.position.set(spawnWorld.x, spawnWorld.y, spawnWorld.z);
 avatar.level = spawn.level;
 
 isoCamera.snapTo(avatar.position);
+
+// --- the horde ----------------------------------------------------------
+const horde = new HordeSystem(renderer.scene, world, { capacity: 400 });
+horde.populate(260);
 
 // --- cursor aiming ------------------------------------------------------
 // The body turns toward the cursor, not toward travel, so backing away from
@@ -110,6 +115,7 @@ const loop = new Loop({
     observer.z = t.z;
     observer.level = avatar.level;
     world.updateView(dt, observer, isoCamera);
+    horde.update(dt, observer);
 
     // A small budget keeps a collapsing building off the critical path.
     world.flushDirty(2);
@@ -121,6 +127,7 @@ const loop = new Loop({
     camFocus.set(avatar.position.x, avatar.level * STOREY + 0.9, avatar.position.z);
     isoCamera.update(frameTime, camFocus);
     renderer.updateLights(camFocus);
+    horde.render(loop.elapsed);
     renderer.render();
     input.endFrame();
 
@@ -134,7 +141,9 @@ const loop = new Loop({
         `   zoom ${isoCamera.viewHeight}m${paused ? '   [PAUSED]' : ''}\n` +
         `endurance [${'|'.repeat(bars)}${'.'.repeat(20 - bars)}]` +
         `${avatar.winded ? ' WINDED' : ''}   ${avatar.gait}\n` +
-        `${world.stats.visible} tiles in sight   room ${world.grid.getRoom(observer.x, observer.z, observer.level)}`;
+        `${world.stats.visible} tiles in sight   room ${world.grid.getRoom(observer.x, observer.z, observer.level)}\n` +
+        `horde ${horde.stats.instances} drawn / ${horde.horde.count} alive   ` +
+        `${horde.horde.stats.chasing} chasing   ${horde.horde.stats.investigating} investigating`;
     }
   },
 });
@@ -142,4 +151,4 @@ const loop = new Loop({
 loop.start();
 
 // Console handle, and the hook the smoke test drives.
-window.__knox = { world, town, renderer, isoCamera, loop, avatar, input };
+window.__knox = { world, town, renderer, isoCamera, loop, avatar, input, horde };

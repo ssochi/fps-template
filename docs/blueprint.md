@@ -5,6 +5,9 @@
 
 **Amendments since v1**
 
+- **M5 — the two highest-risk bets are settled.** Vertex animation textures and
+  flow fields both work as hoped: 260 animated zombies in 2 draw calls, AI for
+  400 in 0.22 ms per tick. The risk table's first row can be struck.
 - **M3 — the player is a hierarchy of rigid parts, not a `SkinnedMesh`.**
   Skinning deforms surfaces across joints, and at this camera's closest zoom a
   shoulder seam is under two pixels. It bought nothing and cost bind matrices,
@@ -169,7 +172,6 @@ for unseen and toward grey-blue for remembered.
 
 | Risk | Mitigation |
 | --- | --- |
-| VAT proves too rigid for readable zombies | Prototype in M5 with a fallback to InstancedSkinnedMesh; keep the crowd behind one interface |
 | Chunk rebuilds stutter when a wall breaks | 16×16×1 chunks keep a rebuild under a millisecond; rebuild off the critical path |
 | Procedural buildings feel same-y | Archetype templates + furnishing rules, not pure noise |
 | Simulation depth becomes busywork, not tension | Every moodle must change a decision, not just a number; cut any that doesn't |

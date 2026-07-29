@@ -56,6 +56,13 @@ export const GAITS = {
   sneak: { stride: 1.0, swing: 0.34, bob: 0.02, lean: 0.12, armSwing: 0.18, crouch: 0.18 },
   walk: { stride: 1.55, swing: 0.55, bob: 0.035, lean: 0.04, armSwing: 0.42, crouch: 0 },
   run: { stride: 3.0, swing: 0.78, bob: 0.06, lean: 0.13, armSwing: 0.66, crouch: 0 },
+
+  // The dead move wrong on purpose: a short dragging stride, almost no arm
+  // counter-swing, and a forward lean the living would fall over from. Silhouette
+  // is the only thing that reads at this camera distance, so the difference has
+  // to be in the pose rather than in any detail.
+  shamble: { stride: 0.95, swing: 0.36, bob: 0.05, lean: 0.12, armSwing: 0.08, crouch: 0.06 },
+  lunge: { stride: 2.4, swing: 0.72, bob: 0.07, lean: 0.19, armSwing: 0.14, crouch: 0 },
 };
 
 /**
@@ -153,8 +160,24 @@ export class Character {
     // rather than snapping from mid-stride to a T-pose.
     const moving = Math.min(1, speed / 1.2);
     this._blend += (moving - this._blend) * Math.min(1, dt * 12);
-    const a = this._blend;
 
+    this.applyPose(phase, gait, this._blend);
+  }
+
+  /**
+   * Set the whole rig from a phase directly, with no time integration.
+   *
+   * Split out of `update` so the same pose function can be sampled at arbitrary
+   * points rather than only stepped forward — which is what the horde's
+   * animation baker needs. Two pose functions, one for play and one for baking,
+   * would drift apart the first time either was tuned.
+   *
+   * @param {number} phase radians; a full gait cycle is 2π
+   * @param {keyof GAITS} gait
+   * @param {number} a amplitude, 0 = neutral stance, 1 = full stride
+   */
+  applyPose(phase, gait, a = 1) {
+    const g = GAITS[gait] ?? GAITS.idle;
     const swing = Math.sin(phase);
     const swingOpp = Math.sin(phase + Math.PI);
 
@@ -175,14 +198,32 @@ export class Character {
     this.hips.position.y = P.hipY - g.crouch * a - bob;
     this.hips.rotation.x = g.lean * a;
 
-    // Idle sway, so a standing character is not a statue.
+    // Idle sway, so a standing character is not a statue. Driven by the phase
+    // rather than the clock so a baked pose is reproducible from its phase alone.
     if (a < 0.25) {
-      const breath = Math.sin(this.clock * 1.6) * 0.012;
+      const breath = Math.sin(phase * 0.5) * 0.012;
       this.hips.position.y += breath * (1 - a);
-      this.torso.rotation.z = Math.sin(this.clock * 0.7) * 0.01 * (1 - a);
+      this.torso.rotation.z = Math.sin(phase * 0.22) * 0.01 * (1 - a);
     } else {
       this.torso.rotation.z = 0;
     }
+  }
+
+  /**
+   * The dead do not carry their arms like the living. Applied on top of a pose,
+   * so the underlying gait maths stays shared with the player.
+   *
+   * @param {number} reach 0 = arms hanging, 1 = arms out in front
+   */
+  applyUndeadArms(reach, phase = 0) {
+    const droop = -0.15 + Math.sin(phase) * 0.05;
+    this.armL.rotation.x = droop - reach * 1.05;
+    this.armR.rotation.x = droop - reach * 1.05;
+    this.armL.rotation.z = 0.16 + reach * 0.1;
+    this.armR.rotation.z = -0.16 - reach * 0.1;
+    this.forearmL.rotation.x = -0.5 + reach * 0.35;
+    this.forearmR.rotation.x = -0.5 + reach * 0.35;
+    this.head.rotation.x = 0.18 * (1 - reach) + 0.05;
   }
 
   /** Turn the head and torso toward an aim yaw relative to the body's facing. */

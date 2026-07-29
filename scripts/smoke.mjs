@@ -158,6 +158,25 @@ try {
     process.stdout.write(`  shot ${shot.name}\n`);
   }
 
+  // Measure what the horde actually costs in draw calls, rather than asserting
+  // it. Render a frame with it hidden, then with it shown, and take the delta.
+  const hordeCost = await page.evaluate(async () => {
+    const { renderer, horde, isoCamera } = window.__knox;
+    const draw = () => {
+      renderer.renderer.render(renderer.scene, isoCamera.camera);
+      return renderer.renderer.info.render.calls;
+    };
+    horde.mesh.visible = false;
+    const without = draw();
+    horde.mesh.visible = true;
+    const with_ = draw();
+    return { without, with_, delta: with_ - without, instances: horde.stats.instances };
+  });
+  console.log(
+    `\n  horde: ${hordeCost.instances} zombies in ${hordeCost.delta} draw call(s) ` +
+      `(${hordeCost.without} -> ${hordeCost.with_})`,
+  );
+
   const stats = await page.evaluate(() => {
     const { renderer, world, loop } = window.__knox;
     return {

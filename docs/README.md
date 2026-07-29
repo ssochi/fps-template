@@ -26,4 +26,4 @@ Development runs as a **milestone loop**:
 
 ## Current cycle
 
-Cycle 1 — M0 … M10. M0–M4 complete.
+Cycle 1 — M0 … M10. M0–M5 complete.
