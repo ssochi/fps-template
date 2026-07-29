@@ -30,6 +30,11 @@ const SHOTS = [
   // cutaway. Capturing it exercises the real code path rather than poking
   // `setLevelCutoff` directly.
   { name: '06-indoors', rotation: 0, zoom: 1, indoors: true },
+  // The player spawns beside their building, which at this camera angle puts
+  // the building between them and the lens — that occlusion is M4's problem.
+  // These two put the character in the open so the rig itself is inspectable.
+  { name: '07-character-idle', rotation: 0, zoom: 0, onRoad: true },
+  { name: '08-character-run', rotation: 0, zoom: 0, onRoad: true, running: true },
 ];
 
 const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
@@ -86,6 +91,23 @@ try {
         avatar.level = s.level;
         avatar.syncLevelHeight();
       }
+      if (s.onRoad) {
+        // Middle of the widest clear stretch of road, away from any facade.
+        const cx = town.roads.vertical[Math.floor(town.roads.vertical.length / 2)];
+        const cz = town.roads.horizontal[Math.floor(town.roads.horizontal.length / 2)];
+        avatar.level = 0;
+        avatar.position.set(cx + 0.5, 0, cz + 6.5);
+        avatar.syncLevelHeight();
+        avatar.hasAim = false;
+        avatar.setYaw(Math.PI * 0.75);
+        isoCamera.snapTo(avatar.position);
+      }
+      if (s.running) {
+        // Drive the gait directly: a screenshot cannot hold a key down.
+        window.__knox.__forceGait = { gait: 'run', speed: 5 };
+      } else {
+        window.__knox.__forceGait = null;
+      }
       if (s.indoors) {
         // Step one tile in from a two-storey building's front door.
         const b = town.buildings.find((x) => x.rect.storeys > 1) ?? town.buildings[0];
@@ -107,7 +129,12 @@ try {
     await page.waitForFunction(() => window.__knox.loop.frame >= window.__knox.__hudTarget, {
       timeout: 5000,
     });
-    await page.screenshot({ path: `${OUT}${shot.name}.png` });
+    // Character shots are cropped tight: at 10 m of view height the figure is
+    // ~90 px in a 1280-wide frame, which is too small to judge a pose in.
+    await page.screenshot({
+      path: `${OUT}${shot.name}.png`,
+      ...(shot.onRoad ? { clip: { x: 505, y: 225, width: 270, height: 270 } } : {}),
+    });
     process.stdout.write(`  shot ${shot.name}\n`);
   }
 

@@ -24,6 +24,22 @@
  */
 import { CHUNK, DIR, DIR_VEC } from '../core/constants.js';
 
+/**
+ * Per-cell object state, bitwise. Separate from `flags` because flags describe
+ * the *terrain* and are written by worldgen, while state describes the object
+ * standing on it and is written during play — a door swings, a window breaks, a
+ * container gets emptied. Keeping them apart means a save file can store the
+ * state array as a delta without also re-storing the town.
+ */
+export const STATE = {
+  /** A door in a doorway is standing open. */
+  DOOR_OPEN: 1 << 0,
+  /** The window in this wall has been smashed — passable, and noisy to make. */
+  WINDOW_BROKEN: 1 << 1,
+  /** A container here has already been looted. */
+  SEARCHED: 1 << 2,
+};
+
 /** Cell flags, bitwise. */
 export const FLAG = {
   /** Blocks movement even with no wall — a filled cell, e.g. bedrock or a pillar. */
@@ -97,6 +113,8 @@ export class TileGrid {
     /** Room id, 0 for outdoors. */
     this.room = new Uint16Array(n);
     this.flags = new Uint8Array(n);
+    /** Runtime state of the object in each cell — see STATE. */
+    this.state = new Uint8Array(n);
 
     this.chunksX = Math.ceil(width / CHUNK);
     this.chunksZ = Math.ceil(depth / CHUNK);
@@ -219,7 +237,58 @@ export class TileGrid {
   blocksSight(x1, z1, x2, z2, level) {
     if (!this.inBounds(x2, z2, level)) return true;
     if (this.flags[this.idx(x2, z2, level)] & FLAG.OPAQUE) return true;
-    return !TRANSPARENT_WALLS.has(this.wallBetween(x1, z1, x2, z2, level));
+    const wall = this.wallBetween(x1, z1, x2, z2, level);
+    // An open door is a hole you can see through; a shut one is a wall.
+    if (wall === WALL.DOORWAY) return !this.isDoorOpen(x1, z1, x2, z2, level);
+    return !TRANSPARENT_WALLS.has(wall);
+  }
+
+  // --- doors ------------------------------------------------------------
+  // A door object lives on one of the two tiles either side of its doorway.
+  // Rather than make callers work out which, these helpers check both.
+
+  /** The tile holding the door object for the doorway between two cells. */
+  doorTile(x1, z1, x2, z2, level) {
+    if (this.wallBetween(x1, z1, x2, z2, level) !== WALL.DOORWAY) return null;
+    if (this.object[this.idx(x1, z1, level)] !== 0) return { x: x1, z: z1 };
+    if (this.inBounds(x2, z2, level) && this.object[this.idx(x2, z2, level)] !== 0) {
+      return { x: x2, z: z2 };
+    }
+    return null;
+  }
+
+  /** True when the doorway has no door in it, or its door stands open. */
+  isDoorOpen(x1, z1, x2, z2, level) {
+    const tile = this.doorTile(x1, z1, x2, z2, level);
+    if (!tile) return true; // an empty doorway is always passable
+    return (this.state[this.idx(tile.x, tile.z, level)] & STATE.DOOR_OPEN) !== 0;
+  }
+
+  /** @returns {boolean} whether anything actually changed */
+  setDoorOpen(x, z, level, open) {
+    const i = this.index(x, z, level);
+    if (i < 0) return false;
+    const was = (this.state[i] & STATE.DOOR_OPEN) !== 0;
+    if (was === open) return false;
+    if (open) this.state[i] |= STATE.DOOR_OPEN;
+    else this.state[i] &= ~STATE.DOOR_OPEN;
+    this.markDirty(x, z, level);
+    return true;
+  }
+
+  /**
+   * Can something *actually* move between two cells right now?
+   *
+   * `canWalk` answers the geometric question and is what pathfinding and
+   * connectivity checks want — a shut door is still a route, it just needs
+   * opening. `canPass` additionally respects door state and is what movement
+   * wants. Conflating the two would either make the horde refuse to path
+   * through doors or let the player walk through closed ones.
+   */
+  canPass(x1, z1, x2, z2, level) {
+    if (!this.canWalk(x1, z1, x2, z2, level)) return false;
+    if (this.wallBetween(x1, z1, x2, z2, level) !== WALL.DOORWAY) return true;
+    return this.isDoorOpen(x1, z1, x2, z2, level);
   }
 
   /** Is this cell somewhere an entity could stand? */

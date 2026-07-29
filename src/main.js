@@ -4,7 +4,7 @@
  * M1 wires the tile grid, the chunk mesher and the isometric rig together over a
  * hand-authored test block. Town generation is M2; the real player is M3.
  */
-import { CapsuleGeometry, Mesh, MeshLambertMaterial, Vector2, Vector3 } from 'three';
+import { Plane, Raycaster, Vector2, Vector3 } from 'three';
 import { Renderer } from './render/Renderer.js';
 import { IsoCamera } from './render/IsoCamera.js';
 import { Loop } from './core/Loop.js';
@@ -12,8 +12,7 @@ import { ACTION, Input } from './core/Input.js';
 import { World } from './world/World.js';
 import { FLAG } from './world/TileGrid.js';
 import { generateTown } from './worldgen/Town.js';
-import { Entity } from './entity/Entity.js';
-import { Walker } from './entity/Walker.js';
+import { Player } from './entity/Player.js';
 import { STOREY, tileToWorld } from './core/constants.js';
 
 const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('app'));
@@ -27,25 +26,33 @@ const world = new World(renderer.scene, 104, 104, 3);
 const town = generateTown(world, 'knox-county');
 const { spawn } = town;
 
-// --- stand-in avatar ----------------------------------------------------
-// A capsule, not a character: M3 owns the real one. It exists so movement,
-// collision and camera follow can be judged now.
-const avatar = new Entity('avatar');
-const avatarMesh = new Mesh(
-  new CapsuleGeometry(0.26, 0.9, 6, 14),
-  new MeshLambertMaterial({ color: 0xd8c9a8 }),
-);
-avatarMesh.position.y = 0.88;
-avatarMesh.castShadow = true;
-avatar.object.add(avatarMesh);
+// --- player -------------------------------------------------------------
+const avatar = new Player(world.grid);
 renderer.scene.add(avatar.object);
 
 const spawnWorld = tileToWorld(spawn.x, spawn.z, spawn.level);
 avatar.position.set(spawnWorld.x, spawnWorld.y, spawnWorld.z);
 avatar.level = spawn.level;
-const walker = new Walker(avatar);
 
 isoCamera.snapTo(avatar.position);
+
+// --- cursor aiming ------------------------------------------------------
+// The body turns toward the cursor, not toward travel, so backing away from
+// something while still facing it is possible. The pointer is projected onto
+// the horizontal plane of the storey the player is standing on — projecting
+// onto y=0 instead would make aiming drift as soon as they went upstairs.
+const raycaster = new Raycaster();
+const aimPlane = new Plane(new Vector3(0, 1, 0), 0);
+const aimHit = new Vector3();
+
+function updateAim() {
+  aimPlane.constant = -(avatar.level * STOREY + 1.0);
+  raycaster.setFromCamera(input.pointer, isoCamera.camera);
+  if (raycaster.ray.intersectPlane(aimPlane, aimHit)) {
+    avatar.aimTarget.copy(aimHit);
+    avatar.hasAim = true;
+  }
+}
 
 // --- loop ---------------------------------------------------------------
 const axis = new Vector2();
@@ -53,6 +60,7 @@ const basisF = new Vector3();
 const basisR = new Vector3();
 const moveDir = new Vector3();
 const camFocus = new Vector3();
+const intent = { move: moveDir, run: false, sneak: false, interact: false };
 let paused = false;
 
 window.addEventListener('resize', () => renderer.setSize(window.innerWidth, window.innerHeight));
@@ -67,28 +75,33 @@ const loop = new Loop({
     if (input.wasPressed(ACTION.ROTATE_CCW)) isoCamera.rotate(-1);
     if (input.wheelSteps) isoCamera.zoom(input.wheelSteps);
 
-    if (input.wasPressed(ACTION.LEVEL_UP) && avatar.level < world.grid.levels - 1) {
-      avatar.level++;
-      avatar.syncLevelHeight();
-    }
-    if (input.wasPressed(ACTION.LEVEL_DOWN) && avatar.level > 0) {
-      avatar.level--;
-      avatar.syncLevelHeight();
-    }
-
     if (!paused) {
+      updateAim();
+
       // Screen-relative movement: "up" is up the screen at any camera rotation.
       input.moveAxis(axis);
       isoCamera.screenBasis(basisF, basisR);
       moveDir.set(0, 0, 0).addScaledVector(basisR, axis.x).addScaledVector(basisF, axis.y);
       if (moveDir.lengthSq() > 1e-8) moveDir.normalize();
 
-      const speed = input.isHeld(ACTION.RUN)
-        ? walker.runSpeed
-        : input.isHeld(ACTION.SNEAK)
-          ? walker.sneakSpeed
-          : walker.walkSpeed;
-      walker.step(world.grid, moveDir, speed, dt);
+      intent.move = moveDir;
+      intent.run = input.isHeld(ACTION.RUN);
+      intent.sneak = input.isHeld(ACTION.SNEAK);
+      intent.interact = input.wasPressed(ACTION.INTERACT);
+
+      // Screenshot hook: a still frame cannot hold a key down, so the smoke
+      // test drives the animator directly. It must *replace* the normal update
+      // rather than follow it — otherwise the idle pass and the forced pass
+      // fight over the animator's speed blend and the pose lands at half
+      // amplitude, which looks like a broken gait rather than a driven one.
+      const forced = window.__knox?.__forceGait;
+      if (forced) {
+        avatar.gait = forced.gait;
+        avatar.currentSpeed = forced.speed;
+        avatar.character.update(dt, forced.speed, forced.gait);
+      } else {
+        avatar.update(intent, dt);
+      }
     }
 
     // Storey cutaway. Outdoors you see the town with its roofs on; step inside
@@ -113,11 +126,14 @@ const loop = new Loop({
 
     if (loop.frame % 15 === 0) {
       const r = renderer.info;
+      const bars = Math.round(avatar.endurance * 20);
       statsEl.textContent =
         `${loop.fps.toFixed(0)} fps   sim ${loop.lastUpdateMs.toFixed(2)}ms   draw ${loop.lastRenderMs.toFixed(2)}ms\n` +
         `${r.calls} draws   ${(r.triangles / 1000).toFixed(1)}k tris   ${world.stats.visible}/${world.stats.chunks} chunks\n` +
         `tile ${Math.floor(avatar.position.x)},${Math.floor(avatar.position.z)}  storey ${avatar.level}` +
-        `   zoom ${isoCamera.viewHeight}m${paused ? '   [PAUSED]' : ''}`;
+        `   zoom ${isoCamera.viewHeight}m${paused ? '   [PAUSED]' : ''}\n` +
+        `endurance [${'|'.repeat(bars)}${'.'.repeat(20 - bars)}]` +
+        `${avatar.winded ? ' WINDED' : ''}   ${avatar.gait}`;
     }
   },
 });

@@ -3,6 +3,14 @@
 > Written at the close of M0. Rewritten at every Exploration milestone.
 > An isometric, multi-storey zombie survival simulation in the browser.
 
+**Amendments since v1**
+
+- **M3 — the player is a hierarchy of rigid parts, not a `SkinnedMesh`.**
+  Skinning deforms surfaces across joints, and at this camera's closest zoom a
+  shoulder seam is under two pixels. It bought nothing and cost bind matrices,
+  weight painting and per-frame skinning. Reasoning in
+  [`milestones/M03-player-movement.md`](./milestones/M03-player-movement.md).
+
 ## 1. Pillars
 
 1. **The tile grid is the game.** One authoritative data structure that
@@ -57,7 +65,8 @@ src/
     Palette.js         the desaturated dusk palette, one source of truth
   entity/
     Entity.js          transform + facing; the only file that writes rotation.y
-    Player.js          controller, stamina, equipped item
+    Player.js          controller, endurance, aiming, doors, stairs, vaults
+    Character.js       segmented rig + distance-driven procedural gait
     Zombie.js          lightweight struct; the horde is SoA, not objects
   sim/
     Horde.js           spawn, migration, flow-field consumption
@@ -127,7 +136,9 @@ Every consumer is a query against this:
   fall, feed) is baked once into a float texture: one row per frame, one texel
   per vertex. The vertex shader reads position by `(vertexId, frame)`. The whole
   horde is one `InstancedMesh` — one draw call — with per-instance clip index and
-  phase offset so they don't march in lockstep.
+  phase offset so they don't march in lockstep. The clips are baked by posing
+  the same segmented rig the player uses (`entity/Character.js`), so there is one
+  body definition rather than two that can drift apart.
 - **Pathing — flow field.** One Dijkstra sweep from the player (or from a noise
   event) across the walkable grid produces a per-cell direction. Every zombie
   reads its own cell and moves. Cost is O(cells) once, not O(agents × A\*).

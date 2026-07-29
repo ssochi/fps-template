@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FLAG, FLOOR, TileGrid, WALL } from '../src/world/TileGrid.js';
 import { DIR } from '../src/core/constants.js';
+import { OBJ, packObject } from '../src/world/Objects.js';
 
 function emptyGrid(w = 8, d = 8, l = 2) {
   const g = new TileGrid(w, d, l);
@@ -123,10 +124,64 @@ describe('sight queries', () => {
     expect(g.blocksSight(2, 2, 3, 2, 0)).toBe(true);
   });
 
-  it('a doorway blocks sight (the door in it is shut until told otherwise)', () => {
+  it('an empty doorway is see-through — it is a hole, not a door', () => {
     const g = emptyGrid();
     g.setWall(2, 2, 0, DIR.E, WALL.DOORWAY);
+    expect(g.blocksSight(2, 2, 3, 2, 0)).toBe(false);
+  });
+
+  it('a shut door blocks sight; opening it does not', () => {
+    const g = emptyGrid();
+    g.setWall(2, 2, 0, DIR.E, WALL.DOORWAY);
+    g.setObject(2, 2, 0, packObject(OBJ.DOOR, DIR.E));
     expect(g.blocksSight(2, 2, 3, 2, 0)).toBe(true);
+    g.setDoorOpen(2, 2, 0, true);
+    expect(g.blocksSight(2, 2, 3, 2, 0)).toBe(false);
+  });
+});
+
+describe('doors', () => {
+  function withDoor() {
+    const g = emptyGrid();
+    g.setWall(2, 2, 0, DIR.E, WALL.DOORWAY);
+    g.setObject(2, 2, 0, packObject(OBJ.DOOR, DIR.E));
+    return g;
+  }
+
+  it('separates the geometric route from the passable one', () => {
+    const g = withDoor();
+    // Pathfinding sees a route through a shut door — it just needs opening.
+    expect(g.canWalk(2, 2, 3, 2, 0)).toBe(true);
+    // Movement does not.
+    expect(g.canPass(2, 2, 3, 2, 0)).toBe(false);
+    g.setDoorOpen(2, 2, 0, true);
+    expect(g.canPass(2, 2, 3, 2, 0)).toBe(true);
+  });
+
+  it('is found from either side of its doorway', () => {
+    const g = withDoor();
+    expect(g.doorTile(2, 2, 3, 2, 0)).toEqual({ x: 2, z: 2 });
+    expect(g.doorTile(3, 2, 2, 2, 0)).toEqual({ x: 2, z: 2 });
+  });
+
+  it('reports whether opening actually changed anything', () => {
+    const g = withDoor();
+    expect(g.setDoorOpen(2, 2, 0, true)).toBe(true);
+    expect(g.setDoorOpen(2, 2, 0, true)).toBe(false);
+    expect(g.setDoorOpen(2, 2, 0, false)).toBe(true);
+  });
+
+  it('marks the chunk dirty so the door is redrawn', () => {
+    const g = withDoor();
+    g.takeDirty();
+    g.setDoorOpen(2, 2, 0, true);
+    expect(g.takeDirty()).toContain(g.chunkKeyForTile(2, 2, 0));
+  });
+
+  it('treats a doorway with no door as permanently open', () => {
+    const g = emptyGrid();
+    g.setWall(2, 2, 0, DIR.E, WALL.DOORWAY);
+    expect(g.canPass(2, 2, 3, 2, 0)).toBe(true);
   });
 });
 

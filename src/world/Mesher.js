@@ -222,7 +222,7 @@ export function meshChunk(grid, cx, cz, level) {
 
       // --- objects ---
       const packed = grid.object[i];
-      if (packed !== OBJ.NONE) emitObject(b, packed, x, z, level, baseY);
+      if (packed !== OBJ.NONE) emitObject(b, packed, x, z, level, baseY, grid.state[i]);
     }
   }
 
@@ -283,10 +283,15 @@ function emitWall(b, material, x, z, level, baseY, isNorth) {
  * Boxes are drawn without a bottom face: every object rests on a floor, so the
  * underside is never visible and is a fifth of the object budget.
  */
-function emitObject(b, packed, x, z, level, baseY) {
+function emitObject(b, packed, x, z, level, baseY, state = 0) {
   const id = objectId(packed);
   const spec = objectSpec(packed);
   if (!spec) return;
+
+  if (id === OBJ.DOOR) {
+    emitDoor(b, packed, x, z, level, baseY, state);
+    return;
+  }
 
   if (id === OBJ.STAIRS_LOW || id === OBJ.STAIRS_HIGH) {
     emitStairs(b, packed, x, z, level, baseY);
@@ -357,6 +362,47 @@ function emitStairs(b, packed, x, z, level, baseY) {
       x1 = x + t1;
     }
     box(b, x0, baseY, z0, x1, h, z1, rgb, level);
+  }
+}
+
+/**
+ * A door: a leaf that fills its doorway when shut and swings flat against the
+ * jamb when open. Drawing the open state as a rotated leaf rather than simply
+ * hiding it is what makes an open door readable at a glance — an empty gap and
+ * a doorless opening would look identical.
+ */
+function emitDoor(b, packed, x, z, level, baseY, state) {
+  const facing = objectFacing(packed);
+  const rgb = objectColor(OBJ.DOOR);
+  const open = (state & 1) !== 0; // STATE.DOOR_OPEN
+  const spec = objectSpec(packed);
+  const h = spec.h;
+  const leaf = 0.9;
+  const thick = 0.09;
+
+  // The doorway runs along the edge the door faces.
+  const alongX = facing === DIR.N || facing === DIR.S;
+  const edge = facing === DIR.N ? z : facing === DIR.S ? z + 1 : facing === DIR.W ? x : x + 1;
+
+  if (alongX) {
+    const zc = edge;
+    if (open) {
+      // Swung flat: the leaf lies perpendicular, hinged at the west jamb.
+      const hx = x + (1 - leaf) / 2;
+      box(b, hx, baseY, zc - leaf, hx + thick, baseY + h, zc, rgb, level);
+    } else {
+      const x0 = x + (1 - leaf) / 2;
+      box(b, x0, baseY, zc - thick / 2, x0 + leaf, baseY + h, zc + thick / 2, rgb, level);
+    }
+  } else {
+    const xc = edge;
+    if (open) {
+      const hz = z + (1 - leaf) / 2;
+      box(b, xc - leaf, baseY, hz, xc, baseY + h, hz + thick, rgb, level);
+    } else {
+      const z0 = z + (1 - leaf) / 2;
+      box(b, xc - thick / 2, baseY, z0, xc + thick / 2, baseY + h, z0 + leaf, rgb, level);
+    }
   }
 }
 
