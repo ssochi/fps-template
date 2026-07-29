@@ -30,6 +30,8 @@ import { t } from './ui/i18n.js';
 import { Panels } from './ui/Panels.js';
 import { LootSystem } from './items/Loot.js';
 import { Construction, Siege } from './sim/Construction.js';
+import { MetaEvents, UTILITY } from './sim/Meta.js';
+import { HelicopterMesh } from './render/HelicopterMesh.js';
 import { Skills, SKILL, WEAPON_SKILL, XP } from './sim/Skills.js';
 import { MOD, Profile } from './sim/Traits.js';
 import { Audio } from './audio/Audio.js';
@@ -122,6 +124,18 @@ export function createGame({
   const panels = new Panels(avatar.inventory);
   panels.player = avatar;
 
+  // --- the world's own schedule -------------------------------------------
+  // Everything the player has faced so far is a reaction to something they did.
+  // This is the first system that happens because time passed.
+  const meta = new MetaEvents(world.grid, { seed });
+  avatar.utilities = meta.utilities;
+  const heliMesh = new HelicopterMesh();
+  renderer.scene.add(heliMesh.group);
+
+  events.on('utility:failed', ({ id }) => {
+    if (id === UTILITY.POWER) renderer.setPower(false);
+  });
+
   const construction = new Construction(world.grid, avatar);
   // Blocked zombies work on whatever is in their way, so a barricade is a delay
   // rather than an off switch.
@@ -148,6 +162,10 @@ export function createGame({
     else if (e.source === 'crafting' || e.source === 'siege') audio.hammer(wx, wz);
     else if (e.source === 'attack') audio.thud(wx, wz, { pitch: 1.2 });
     else if (e.source === 'shove') audio.thud(wx, wz, { pitch: 0.8, gain: 0.35 });
+    else if (e.source === 'helicopter') audio.rotor(wx, wz);
+    else if (e.source === 'gunshot') audio.gunshot(wx, wz);
+    else if (e.source === 'alarm') audio.alarm(wx, wz);
+    else if (e.source === 'scream') audio.groan(wx, wz, 0.9);
     else audio.crack(wx, wz);
   });
   events.on('player:wounded', () => audio.hurt());
@@ -325,6 +343,20 @@ export function createGame({
       observer.x = t.x;
       observer.z = t.z;
       observer.level = avatar.level;
+      // The in-game clock is advanced once, here, because the metagame needs it
+      // before the survival systems do — a schedule measured in days cannot run
+      // on a clock that has not ticked yet.
+      const gameDtPending = clock.advance(dt);
+      // The metagame reads the calendar and emits into the same sound field
+      // everything else does, so the horde reacts to a helicopter exactly as it
+      // reacts to a hammer — with no special case anywhere.
+      meta.update(dt, gameDtPending, clock, {
+        x: observer.x,
+        z: observer.z,
+        level: observer.level,
+        indoors: world.grid.hasFlag(observer.x, observer.z, observer.level, FLAG.INDOOR),
+      });
+
       world.updateView(dt, observer, isoCamera);
       // Nothing may cover the player. Driven from here rather than from
       // `updateView` because it needs their world position, not their tile.
@@ -343,7 +375,7 @@ export function createGame({
       // One clock, advanced in one place. Bleeding is felt in real seconds;
       // hunger and infection are measured in days, so Body and Moodles are handed
       // both rather than each inventing a scale.
-      const gameDt = clock.advance(dt);
+      const gameDt = gameDtPending;
       const hoursSince = gameDt / 3600;
       // Everything perishable ages on the in-game clock: what you carry, and what
       // is still sitting in the containers you have already opened.
@@ -378,6 +410,8 @@ export function createGame({
       isoCamera.update(frameTime, camFocus);
       renderer.setSun(clock.sunAngles(), clock.daylight);
       renderer.setTorch(avatar.position, avatar.torchOn && avatar.hasTorch);
+      renderer.stepPower(frameTime);
+      heliMesh.sync(meta.helicopter);
 
       // Audio follows the camera's focus, not the player, so a sound is placed
       // relative to what the screen is showing.
@@ -468,6 +502,7 @@ export function createGame({
   const game = {
     world, town, renderer, isoCamera, loop, avatar, input, horde, combat,
     clock, moodles, hud, help, loot, panels, construction, siege, skills, audio,
+    meta, heliMesh,
     profile,
     seed,
     Save,

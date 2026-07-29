@@ -27,6 +27,8 @@ export class Hud {
     this.el = {};
     this._build();
     this._flash = null;
+    /** @type {Array<{ text: string, tone: string, until: number }>} */
+    this._broadcasts = [];
 
     // Wounds flash the body panel. A swing that lands and one that misses used
     // to look identical, which made combat feel like nothing was happening.
@@ -36,6 +38,21 @@ export class Hud {
     this._offDeath = events.on('player:died', (e) => this.showDeath(e));
     this._offLevel = events.on('skill:levelled', ({ name, level }) => {
       this._toast = { text: `${name} ${level}`, until: performance.now() + 2600 };
+    });
+
+    /**
+     * The emergency broadcast log.
+     *
+     * A metagame event that nobody notices is not an event, and the ones M16
+     * schedules happen *somewhere else* — a gunshot two streets over, the grid
+     * failing overnight. This is the only channel that says so. Held for a long
+     * time and stacked, because "the water goes off tomorrow" is something the
+     * player has to remember rather than react to.
+     */
+    this._offBroadcast = events.on('meta:broadcast', ({ text, tone }) => {
+      this._broadcasts.push({ text, tone, until: performance.now() + 14000 });
+      if (this._broadcasts.length > 4) this._broadcasts.shift();
+      this._renderBroadcasts();
     });
   }
 
@@ -62,12 +79,13 @@ export class Hud {
         <div id="hud-weapon"></div>
         <div id="hud-help">${t('hud.help', 'WASD move · LMB attack · RMB shove · shift run · ctrl sneak · E interact · Tab bag · / controls')}</div>
       </div>
+      <div id="hud-broadcast"></div>
       <div id="hud-death" class="hidden"></div>
     `;
 
     for (const id of [
       'hud-clock', 'hud-debug', 'hud-moodles', 'hud-body', 'hud-weapon',
-      'bar-health', 'bar-endurance', 'hud-death', 'hud-skills',
+      'bar-health', 'bar-endurance', 'hud-death', 'hud-skills', 'hud-broadcast',
     ]) {
       this.el[id] = this.root.querySelector(`#${id}`);
     }
@@ -102,6 +120,7 @@ export class Hud {
     this.el['bar-endurance'].style.background = player.winded ? '#c96f4a' : '#5f8592';
 
     if (skills) this._renderSkills(skills);
+    if (this._broadcasts.length) this._renderBroadcasts();
 
     const w = player.weapon;
     const cond = Math.round(w.conditionFraction * 100);
@@ -109,6 +128,14 @@ export class Hud {
       `<b>${t(`weapon.${w.def.id}`, w.def.name)}</b>` +
       `${w.broken ? ` <em>${t('hud.broken', 'broken')}</em>` : ` <span>${cond}%</span>`}` +
       (moodles.asleep ? ` &nbsp;·&nbsp; <em>${t('hud.asleep', 'asleep')}</em>` : '');
+  }
+
+  _renderBroadcasts() {
+    const now = performance.now();
+    this._broadcasts = this._broadcasts.filter((b) => b.until > now);
+    this.el['hud-broadcast'].innerHTML = this._broadcasts
+      .map((b) => `<div class="bcast ${b.tone}">${b.text}</div>`)
+      .join('');
   }
 
   /** Only skills above zero: an empty sheet is noise. */
@@ -208,6 +235,7 @@ export class Hud {
   dispose() {
     this._offWound();
     this._offDeath();
+    this._offBroadcast?.();
     this._offLevel();
   }
 }
@@ -278,6 +306,17 @@ const CSS = `
 .death-card dl { display: flex; justify-content: center; gap: 34px; margin: 0 0 20px; }
 .death-card dt { opacity: .5; font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
 .death-card dd { margin: 2px 0 0; font-size: 16px; }
+#hud-broadcast {
+  position: absolute; left: 50%; top: 68px; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 4px; align-items: center;
+  pointer-events: none; max-width: 70vw;
+}
+.bcast {
+  padding: 5px 14px; border-radius: 2px; font-size: 12px; letter-spacing: .04em;
+  background: rgba(12,16,22,.82); border-left: 3px solid #8a9099; color: #c3ccd6;
+}
+.bcast.warning { border-left-color: #c9a052; color: #e0c98f; }
+.bcast.bad { border-left-color: #c94a4a; color: #e7a9a9; }
 .death-card .learned { opacity: .55; font-size: 11px; margin: 0 0 18px; }
 .death-card .chosen { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; margin: 0 0 12px; }
 .death-card .chosen span { font-size: 11px; padding: 2px 8px; border-radius: 2px; border: 1px solid; }

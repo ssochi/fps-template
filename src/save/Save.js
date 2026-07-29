@@ -67,6 +67,10 @@ export function serialise(game) {
     // Who the survivor is, so Continue restores the character rather than the
     // last one the menu happened to be showing. It is three strings.
     profile: game.profile?.toJSON() ?? null,
+    // Which utilities have failed and whether the helicopter has been. The
+    // *schedule* is derived from the seed, so only what has already happened
+    // needs storing — three booleans and a list of announcements.
+    meta: game.meta?.toJSON() ?? null,
     clock: { elapsed: clock.elapsed },
     player: {
       x: avatar.position.x,
@@ -154,6 +158,9 @@ export function restore(game, data, { Item, Container, WeaponInstance, Skills })
     grid.barricadeW[index] = barricades[i + 3];
     grid.barricadeHpW[index] = barricades[i + 4];
   }
+
+  game.meta?.fromJSON(data.meta);
+  if (game.meta && !game.meta.utilities.power) game.renderer?.setPower(false);
 
   loot.opened.clear();
   for (const saved of containers) {

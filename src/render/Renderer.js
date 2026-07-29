@@ -84,6 +84,9 @@ export class Renderer {
      * street, so carrying one changes *where* you can see rather than how far.
      */
     this._bufferSize = new Vector2(1, 1);
+    /** 1 while the grid is up, 0 once it has failed. Eased. */
+    this.power = 1;
+    this._powerTarget = 1;
     this.torch = new PointLight(0xffd9a0, 0, 9, 1.6);
     this.torch.castShadow = false; // a second shadow map for one lamp is not worth it
     this.scene.add(this.torch);
@@ -130,11 +133,41 @@ export class Renderer {
     // read. When torches and lamps exist this can come back down, because then
     // darkness will have an answer.
     const dayness = Math.max(0, Math.min(1, daylight));
-    this.key.intensity = MOOD.keyIntensity * (0.1 + dayness * 0.9);
+
+    // The night floor, and what the power cut is *for*.
+    //
+    // M7 set this floor deliberately high and said why: an unlit street under
+    // an overcast sky is unreadable, and the first pass at night was a black
+    // screen with a HUD on it. The note ended "when torches and lamps exist
+    // this can come back down, because then darkness will have an answer."
+    //
+    // A power cut is that moment. While the grid is up the town has streetlight
+    // and the floor stays where M7 put it; when it fails the floor drops by
+    // half, night becomes genuinely dark, and M9's torch stops being strictly
+    // optional. Nothing new was added to make the world harder — something
+    // that was always there was taken away.
+    const lit = 0.55 + this.power * 0.45;
+    const nightFloor = 0.1 * lit;
+    this.key.intensity = MOOD.keyIntensity * (nightFloor + dayness * (1 - nightFloor));
     this.key.color.setHex(dayness > 0.5 ? MOOD.key : MOOD.keyDusk);
-    this.fill.intensity = MOOD.fillIntensity * (0.46 + dayness * 0.54);
+    this.fill.intensity = MOOD.fillIntensity * (0.46 * lit + dayness * (1 - 0.46 * lit));
     this.fill.color.setHex(dayness > 0.35 ? MOOD.fillSky : MOOD.fillNight);
     this.scene.background.setHex(dayness > 0.35 ? MOOD.sky : MOOD.skyNight);
+  }
+
+  /**
+   * Whether the town still has mains power, 0–1 so it can fade rather than pop.
+   * Read by `setSun` above; the grid failing is a lighting change, not a new
+   * light source.
+   */
+  setPower(on) {
+    this._powerTarget = on ? 1 : 0;
+  }
+
+  /** Eased toward the target, so the lights go out over a few seconds. */
+  stepPower(dt) {
+    const k = 1 - Math.exp(-dt / 2.5);
+    this.power += (this._powerTarget - this.power) * k;
   }
 
   /**

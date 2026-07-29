@@ -271,6 +271,83 @@ export class Audio {
     this.stats.played++;
   }
 
+  /**
+   * Rotor wash. A low pulsing thud rather than a tone, because what makes a
+   * helicopter recognisable at distance is the beat, not the pitch.
+   */
+  rotor(x, z) {
+    if (!this.ready) return;
+    const place = this._place(x, z);
+    if (!place || !this._allow('rotor', 0.9)) return;
+
+    const ctx = this.ctx;
+    const out = this._voice(place, 0.5);
+    const src = this._noiseSource();
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 220;
+
+    // The beat: a low-frequency oscillator chopping the noise.
+    const chop = ctx.createGain();
+    chop.gain.value = 0;
+    const lfo = ctx.createOscillator();
+    lfo.type = 'sawtooth';
+    lfo.frequency.value = 13;
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 0.5;
+    lfo.connect(lfoGain);
+    lfoGain.connect(chop.gain);
+
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.001, ctx.currentTime);
+    env.gain.linearRampToValueAtTime(0.7, ctx.currentTime + 0.2);
+    env.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 1.0);
+
+    src.connect(filter);
+    filter.connect(chop);
+    chop.connect(env);
+    env.connect(out);
+    src.start();
+    lfo.start();
+    src.stop(ctx.currentTime + 1.05);
+    lfo.stop(ctx.currentTime + 1.05);
+    this.stats.played++;
+  }
+
+  /** A gunshot, somewhere else. Loud, brief, and gone. */
+  gunshot(x, z) {
+    if (!this.ready) return;
+    const place = this._place(x, z);
+    if (!place || !this._allow('gunshot', 0.25)) return;
+    this.crack(x, z, { pitch: 1.9, gain: 0.7 });
+    this.thud(x, z, { pitch: 0.55, gain: 0.55 });
+  }
+
+  /** A car alarm: two alternating tones, which is what makes it a car alarm. */
+  alarm(x, z) {
+    if (!this.ready) return;
+    const place = this._place(x, z);
+    if (!place || !this._allow('alarm', 1.6)) return;
+
+    const ctx = this.ctx;
+    const out = this._voice(place, 0.3);
+    for (let i = 0; i < 4; i++) {
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.value = i % 2 === 0 ? 820 : 640;
+      const env = ctx.createGain();
+      const at = ctx.currentTime + i * 0.22;
+      env.gain.setValueAtTime(0.0001, at);
+      env.gain.linearRampToValueAtTime(0.28, at + 0.02);
+      env.gain.exponentialRampToValueAtTime(0.0001, at + 0.2);
+      osc.connect(env);
+      env.connect(out);
+      osc.start(at);
+      osc.stop(at + 0.22);
+    }
+    this.stats.played++;
+  }
+
   /** The player being hurt. Deliberately not positional — it is happening to you. */
   hurt() {
     if (!this.ready) return;

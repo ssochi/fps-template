@@ -36,8 +36,8 @@ reasoning in [`blueprint.md` §8](./blueprint.md).
 | M13 | The horde that moves | ✅ Complete | 6 | 357 tests; bounded 3D flow field — **flat 0.75 ms at any map size**; stairs; migration |
 | M14 | **Playable** | ✅ Complete | 4 | 380 tests; 中文 UI, controls screen, a marker you can find, facing follows travel, 260 → 90 zombies |
 | M15 | **X-ray** | ✅ Complete | 1 | 389 tests; screen-space occlusion cutaway — walls, roofs and furniture between the camera and you dissolve |
-| M16 | Metagame events & the shutoff clock | 🟡 Next | — | The helicopter; water and power failing on a schedule. *Written and parked since M14* |
-| M17 | Water, fire and food | ⬜ Planned | — | Rain collectors, campfires, cooking, generators |
+| M16 | Metagame events & the shutoff clock | ✅ Complete | 4 | 411 tests; water and power fail on a seeded schedule, taps run dry, the helicopter hunts |
+| M17 | Water, fire and food | 🟡 Next | — | Rain collectors, campfires, cooking, generators |
 | M18 | Full carpentry | ⬜ Planned | — | Placeable furniture and storage, built walls, barricade repair |
 | M19 | The world beyond houses | ⬜ Planned | — | Shops, warehouse, fuel station; loot tables per archetype |
 | M20 | Vehicles | ⬜ Planned | — | Keys, hotwiring, fuel, parts, mobile storage |
@@ -56,6 +56,10 @@ work; farming and meta-progression move into cycle 3.
   7 → 4 as milestones shifted from building systems to connecting them. M16–M20
   build new systems; if they land in three passes, suspect the verification
   rather than celebrate the velocity.
+- **The two-clock convention needs a test, not another paragraph.** M6's
+  bleeding, M7's panic and M16's helicopter were all rates written against the
+  wrong clock, and all three read as the feature being broken. Three milestone
+  docs warning about it did not stop the third.
 - **A correct system can solve half a problem for fourteen milestones.** M4's
   cutaway opens the building you are *inside*; nothing ever opened the building
   you are standing *behind*, and its doc reads as complete because the half it

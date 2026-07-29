@@ -102,6 +102,8 @@ export class Player extends Entity {
     this.inventory = new Inventory(10 * this.profile.mod(MOD.CARRY_CAPACITY));
     /** Set by main once Moodles exists; injuries and moodles both slow you. */
     this.moodles = null;
+    /** Set by main. Lets `E` drink from a tap while the mains are still on. */
+    this.utilities = null;
     /** Whether the torch in the bag is lit. */
     this.torchOn = false;
 
@@ -304,6 +306,20 @@ export class Player extends Entity {
       const open = this.grid.isDoorOpen(x, z, x + v.dx, z + v.dz, this.level);
       this._beginDoor({ ...tile, open: !open });
       return;
+    }
+
+    // A tap, a cistern or a bath on this tile or the next one over. Placed
+    // between doors and vaulting because it is the rarer intent of the two and
+    // you are usually standing *on* the tile, not facing it.
+    if (this.utilities && this.moodles) {
+      for (const [dx, dz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const hydration = this.utilities.drink(this.grid, x + dx, z + dz, this.level);
+        if (hydration > 0) {
+          this.moodles.drink(hydration);
+          events.emit('player:drank', { x: x + dx, z: z + dz, hydration });
+          return;
+        }
+      }
     }
 
     // Otherwise try to vault whatever is directly ahead.

@@ -57,6 +57,10 @@ const SHOTS = [
   // was one storey and an upstairs zombie could only wander, so a first floor
   // was a place you could always retreat to.
   { name: '15-upstairs-chase', rotation: 0, zoom: 0, upstairsChase: true },
+  // M16: the world acting on its own. The helicopter hunting, and the night
+  // after the grid fails — which is what M7's high night floor was waiting for.
+  { name: '16-helicopter', rotation: 0, zoom: 3, helicopter: true },
+  { name: '17-blackout', rotation: 0, zoom: 2, blackout: true },
 ];
 
 /**
@@ -353,6 +357,51 @@ try {
         av.body.pain = 0;
         return { staged: ring.length, kills: window.__knox.combat.stats.kills };
       }
+      if (s.helicopter) {
+        const { avatar: av, meta, town: t, isoCamera: cam, clock: ck, heliMesh } = window.__knox;
+        // Out in the open, at midday, so it can see them.
+        const cx = t.roads.vertical[Math.floor(t.roads.vertical.length / 2)];
+        const cz = t.roads.horizontal[Math.floor(t.roads.horizontal.length / 2)];
+        av.level = 0;
+        av.position.set(cx + 0.5, 0, cz + 4.5);
+        av.syncLevelHeight();
+        ck.elapsed = Math.floor(ck.elapsed / 86400) * 86400 + 12 * 3600;
+
+        // Launch it for real and fly it in, rather than placing it: the shot is
+        // meant to prove the hunt works, not that a mesh can be positioned.
+        meta.helicopter.launch(Math.floor(av.position.x), Math.floor(av.position.z));
+        const observer = {
+          x: Math.floor(av.position.x), z: Math.floor(av.position.z), level: 0, indoors: false,
+        };
+        for (let i = 0; i < 30 * 25; i++) meta.helicopter.update(1 / 30, 1.6, observer);
+        heliMesh.sync(meta.helicopter);
+        // The beam eases in over many frames; this shot is one.
+        heliMesh.beamMaterial.opacity = 0.2;
+        cam.snapTo(av.position);
+        return {
+          state: meta.helicopter.state,
+          sighted: meta.helicopter.sighted,
+          x: meta.helicopter.x.toFixed(1),
+        };
+      }
+
+      if (s.blackout) {
+        const { avatar: av, meta, renderer: r, clock: ck, town: t, isoCamera: cam } = window.__knox;
+        const cx = t.roads.vertical[1];
+        const cz = t.roads.horizontal[1];
+        av.level = 0;
+        av.position.set(cx + 0.5, 0, cz + 4.5);
+        av.syncLevelHeight();
+        av.torchOn = true;
+        av.inventory.add(new (av.inventory.items[0].constructor)('torch'));
+        ck.elapsed = Math.floor(ck.elapsed / 86400) * 86400 + 2 * 3600;
+        meta.utilities.power = false;
+        r.setPower(false);
+        r.power = 0; // the ease is over seconds; a screenshot is one frame
+        cam.snapTo(av.position);
+        return { power: meta.utilities.power, waterDay: meta.utilities.waterDay };
+      }
+
       if (s.upstairsChase) {
         const { avatar: av, town: t, world: w, horde: hs, isoCamera: cam } = window.__knox;
         const g = w.grid;

@@ -228,6 +228,18 @@ const TABLES = {
     'object.bed': '床', 'object.stove': '炉灶', 'object.bin': '垃圾桶',
     'object.container': '容器',
 
+    // --- the metagame -------------------------------------------------
+    'meta.water.warning': '紧急广播：自来水供应将在一天内中断。',
+    'meta.power.warning': '紧急广播：电网将在一天内失效。',
+    'meta.water.off': '水龙头没水了。',
+    'meta.power.off': '停电了。',
+    'meta.heli.warning': '紧急广播：侦测到空中活动。',
+    'meta.heli.inbound': '远处传来直升机的声音。',
+    'meta.heli.spotted': '直升机发现你了。',
+    'meta.heli.leaving': '直升机正在离开。',
+    'meta.drank': '你喝了水。',
+    'meta.dry': '没有水。',
+
     // --- misc ---------------------------------------------------------
     'time.day': '第 {n} 天',
     'weekday.0': '周日', 'weekday.1': '周一', 'weekday.2': '周二',
