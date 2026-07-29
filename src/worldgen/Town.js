@@ -65,6 +65,10 @@ export function generateTown(world, seed = 'knox') {
 
   decorateStreets(grid, rng.fork('street'), roads);
 
+  // The cutaway needs to know which rooms belong together, so that stepping
+  // into one room opens the whole building rather than just that room.
+  world.cutaway?.registerBuildings(buildings);
+
   world.flushDirty(Infinity);
 
   const spawn = pickSpawn(grid, buildings);

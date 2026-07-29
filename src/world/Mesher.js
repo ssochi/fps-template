@@ -22,6 +22,7 @@
 import { BufferAttribute, BufferGeometry } from 'three';
 import { CHUNK, DIR, STOREY, TILE } from '../core/constants.js';
 import { FLOOR, WALL } from './TileGrid.js';
+import { FACING_NONE } from '../render/WorldMaterial.js';
 import { OBJ, objectColor, objectFacing, objectId, objectSpec } from './Objects.js';
 import { FLOOR_COLOR, WALL_COLOR } from '../render/Palette.js';
 
@@ -95,8 +96,12 @@ class MeshBuilder {
     this.positions = [];
     this.normals = [];
     this.colors = [];
-    /** Which storey each vertex belongs to — M4 fades storeys above the player. */
+    /** Which storey each vertex belongs to — the cutaway hides storeys above. */
     this.levels = [];
+    /** Which way a wall face points, or FACING_NONE for anything not a wall. */
+    this.facings = [];
+    /** Which room the surface belongs to, for the per-room cutaway. */
+    this.rooms = [];
   }
 
   /**
@@ -105,8 +110,10 @@ class MeshBuilder {
    * @param {number[]} rgb base colour
    * @param {number[]} ao per-corner multiplier, same order as the corners
    * @param {number} level storey index
+   * @param {number} [facing] one of DIR for wall faces, FACING_NONE otherwise
+   * @param {number} [room] room id this surface belongs to
    */
-  quad(p0, p1, p2, p3, rgb, ao, level) {
+  quad(p0, p1, p2, p3, rgb, ao, level, facing = FACING_NONE, room = 0) {
     const ux = p1[0] - p0[0];
     const uy = p1[1] - p0[1];
     const uz = p1[2] - p0[2];
@@ -130,6 +137,8 @@ class MeshBuilder {
       const k = ao[c];
       this.colors.push(rgb[0] * k, rgb[1] * k, rgb[2] * k);
       this.levels.push(level);
+      this.facings.push(facing);
+      this.rooms.push(room);
     }
   }
 
@@ -138,7 +147,9 @@ class MeshBuilder {
     geo.setAttribute('position', new BufferAttribute(new Float32Array(this.positions), 3));
     geo.setAttribute('normal', new BufferAttribute(new Float32Array(this.normals), 3));
     geo.setAttribute('color', new BufferAttribute(new Float32Array(this.colors), 3));
-    geo.setAttribute('level', new BufferAttribute(new Float32Array(this.levels), 1));
+    geo.setAttribute('aLevel', new BufferAttribute(new Float32Array(this.levels), 1));
+    geo.setAttribute('aFacing', new BufferAttribute(new Float32Array(this.facings), 1));
+    geo.setAttribute('aRoom', new BufferAttribute(new Float32Array(this.rooms), 1));
     geo.computeBoundingSphere();
     return geo;
   }
@@ -209,20 +220,36 @@ export function meshChunk(grid, cx, cz, level) {
           rgb,
           ao,
           level,
+          FACING_NONE,
+          grid.room[i],
         );
       }
 
       // --- walls ---
       // Only this cell's own north and west edges: every wall belongs to
       // exactly one cell, so iterating cells visits every wall exactly once.
+      // Each wall *face* carries the room lying BEHIND it — the one it would
+      // hide from a viewer standing on the side its normal points to. That is
+      // what the cutaway needs: a wall is in the way when the room you are
+      // looking into is behind it. Tagging a face with its own room instead
+      // removes the room's far walls along with its near ones, leaving the
+      // interior with no backdrop at all.
       const wn = grid.wallN[i];
-      if (wn !== WALL.NONE) emitWall(b, wn, x, z, level, baseY, true);
+      if (wn !== WALL.NONE) {
+        // North face (−Z) hides this cell; south face (+Z) hides the one north.
+        emitWall(b, wn, x, z, level, baseY, true, grid.room[i], grid.getRoom(x, z - 1, level));
+      }
       const ww = grid.wallW[i];
-      if (ww !== WALL.NONE) emitWall(b, ww, x, z, level, baseY, false);
+      if (ww !== WALL.NONE) {
+        // West face (−X) hides this cell; east face (+X) hides the one west.
+        emitWall(b, ww, x, z, level, baseY, false, grid.room[i], grid.getRoom(x - 1, z, level));
+      }
 
       // --- objects ---
       const packed = grid.object[i];
-      if (packed !== OBJ.NONE) emitObject(b, packed, x, z, level, baseY, grid.state[i]);
+      if (packed !== OBJ.NONE) {
+        emitObject(b, packed, x, z, level, baseY, grid.state[i], grid.room[i]);
+      }
     }
   }
 
@@ -235,8 +262,10 @@ export function meshChunk(grid, cx, cz, level) {
  * @param {number} material
  * @param {boolean} isNorth true for a north-edge wall (runs along X), false for
  *   a west-edge wall (runs along Z)
+ * @param {number} roomNear room hidden by the face whose normal points −Z / −X
+ * @param {number} roomFar   room hidden by the face whose normal points +Z / +X
  */
-function emitWall(b, material, x, z, level, baseY, isNorth) {
+function emitWall(b, material, x, z, level, baseY, isNorth, roomNear, roomFar) {
   const rgb = WALL_COLOR[material] ?? WALL_COLOR[WALL.PLASTER];
   const rects = wallRects(material);
 
@@ -258,9 +287,9 @@ function emitWall(b, material, x, z, level, baseY, isNorth) {
       const zn = z * TILE - WALL_SKIN;
       const zs = z * TILE + WALL_SKIN;
       // Face pointing north (−Z).
-      b.quad([bx, y0, zn], [ax, y0, zn], [ax, y1, zn], [bx, y1, zn], rgb, ao, level);
+      b.quad([bx, y0, zn], [ax, y0, zn], [ax, y1, zn], [bx, y1, zn], rgb, ao, level, DIR.N, roomNear);
       // Face pointing south (+Z).
-      b.quad([ax, y0, zs], [bx, y0, zs], [bx, y1, zs], [ax, y1, zs], dim, ao, level);
+      b.quad([ax, y0, zs], [bx, y0, zs], [bx, y1, zs], [ax, y1, zs], dim, ao, level, DIR.S, roomFar);
     } else {
       // Segment lies along Z at constant X = x, spanning u ∈ [z, z+1].
       const az = (z + r.u0) * TILE;
@@ -270,9 +299,9 @@ function emitWall(b, material, x, z, level, baseY, isNorth) {
       const xw = x * TILE - WALL_SKIN;
       const xe = x * TILE + WALL_SKIN;
       // Face pointing west (−X).
-      b.quad([xw, y0, az], [xw, y0, bz], [xw, y1, bz], [xw, y1, az], rgb, ao, level);
+      b.quad([xw, y0, az], [xw, y0, bz], [xw, y1, bz], [xw, y1, az], rgb, ao, level, DIR.W, roomNear);
       // Face pointing east (+X).
-      b.quad([xe, y0, bz], [xe, y0, az], [xe, y1, az], [xe, y1, bz], dim, ao, level);
+      b.quad([xe, y0, bz], [xe, y0, az], [xe, y1, az], [xe, y1, bz], dim, ao, level, DIR.E, roomFar);
     }
   }
 }
@@ -283,26 +312,26 @@ function emitWall(b, material, x, z, level, baseY, isNorth) {
  * Boxes are drawn without a bottom face: every object rests on a floor, so the
  * underside is never visible and is a fifth of the object budget.
  */
-function emitObject(b, packed, x, z, level, baseY, state = 0) {
+function emitObject(b, packed, x, z, level, baseY, state = 0, room = 0) {
   const id = objectId(packed);
   const spec = objectSpec(packed);
   if (!spec) return;
 
   if (id === OBJ.DOOR) {
-    emitDoor(b, packed, x, z, level, baseY, state);
+    emitDoor(b, packed, x, z, level, baseY, state, room);
     return;
   }
 
   if (id === OBJ.STAIRS_LOW || id === OBJ.STAIRS_HIGH) {
-    emitStairs(b, packed, x, z, level, baseY);
+    emitStairs(b, packed, x, z, level, baseY, room);
     return;
   }
   if (id === OBJ.TREE) {
-    emitTree(b, x, z, level, baseY);
+    emitTree(b, x, z, level, baseY, room);
     return;
   }
   if (id === OBJ.LAMPPOST) {
-    emitLamppost(b, x, z, level, baseY);
+    emitLamppost(b, x, z, level, baseY, room);
     return;
   }
 
@@ -326,11 +355,11 @@ function emitObject(b, packed, x, z, level, baseY, state = 0) {
 
   const y0 = baseY + (spec.y ?? 0);
   const y1 = y0 + spec.h;
-  box(b, cx - w / 2, y0, cz - d / 2, cx + w / 2, y1, cz + d / 2, objectColor(id), level);
+  box(b, cx - w / 2, y0, cz - d / 2, cx + w / 2, y1, cz + d / 2, objectColor(id), level, room);
 }
 
 /** Stairs as four discrete steps, so they read as stairs at any zoom. */
-function emitStairs(b, packed, x, z, level, baseY) {
+function emitStairs(b, packed, x, z, level, baseY, room) {
   const id = objectId(packed);
   const facing = objectFacing(packed);
   const rgb = objectColor(id);
@@ -361,7 +390,7 @@ function emitStairs(b, packed, x, z, level, baseY) {
       x0 = x + t0;
       x1 = x + t1;
     }
-    box(b, x0, baseY, z0, x1, h, z1, rgb, level);
+    box(b, x0, baseY, z0, x1, h, z1, rgb, level, room);
   }
 }
 
@@ -371,7 +400,7 @@ function emitStairs(b, packed, x, z, level, baseY) {
  * hiding it is what makes an open door readable at a glance — an empty gap and
  * a doorless opening would look identical.
  */
-function emitDoor(b, packed, x, z, level, baseY, state) {
+function emitDoor(b, packed, x, z, level, baseY, state, room) {
   const facing = objectFacing(packed);
   const rgb = objectColor(OBJ.DOOR);
   const open = (state & 1) !== 0; // STATE.DOOR_OPEN
@@ -389,19 +418,19 @@ function emitDoor(b, packed, x, z, level, baseY, state) {
     if (open) {
       // Swung flat: the leaf lies perpendicular, hinged at the west jamb.
       const hx = x + (1 - leaf) / 2;
-      box(b, hx, baseY, zc - leaf, hx + thick, baseY + h, zc, rgb, level);
+      box(b, hx, baseY, zc - leaf, hx + thick, baseY + h, zc, rgb, level, room);
     } else {
       const x0 = x + (1 - leaf) / 2;
-      box(b, x0, baseY, zc - thick / 2, x0 + leaf, baseY + h, zc + thick / 2, rgb, level);
+      box(b, x0, baseY, zc - thick / 2, x0 + leaf, baseY + h, zc + thick / 2, rgb, level, room);
     }
   } else {
     const xc = edge;
     if (open) {
       const hz = z + (1 - leaf) / 2;
-      box(b, xc - leaf, baseY, hz, xc, baseY + h, hz + thick, rgb, level);
+      box(b, xc - leaf, baseY, hz, xc, baseY + h, hz + thick, rgb, level, room);
     } else {
       const z0 = z + (1 - leaf) / 2;
-      box(b, xc - thick / 2, baseY, z0, xc + thick / 2, baseY + h, z0 + leaf, rgb, level);
+      box(b, xc - thick / 2, baseY, z0, xc + thick / 2, baseY + h, z0 + leaf, rgb, level, room);
     }
   }
 }
@@ -414,7 +443,7 @@ function emitDoor(b, packed, x, z, level, baseY, state) {
  * decides whether the town looks like a town. Two tapering canopy blocks are
  * enough to read as foliage at every zoom on the ladder.
  */
-function emitTree(b, x, z, level, baseY) {
+function emitTree(b, x, z, level, baseY, room) {
   const trunk = objectColor(OBJ.TREE).map((c) => c * 0.42);
   const leafLow = objectColor(OBJ.TREE);
   const leafHigh = leafLow.map((c) => c * 1.18);
@@ -422,40 +451,42 @@ function emitTree(b, x, z, level, baseY) {
   const cx = x + 0.5;
   const cz = z + 0.5;
 
-  box(b, cx - 0.13, baseY, cz - 0.13, cx + 0.13, baseY + 1.5, cz + 0.13, trunk, level);
-  box(b, cx - 0.62, baseY + 1.2, cz - 0.62, cx + 0.62, baseY + 2.9, cz + 0.62, leafLow, level);
-  box(b, cx - 0.4, baseY + 2.7, cz - 0.4, cx + 0.4, baseY + 4.0, cz + 0.4, leafHigh, level);
+  box(b, cx - 0.13, baseY, cz - 0.13, cx + 0.13, baseY + 1.5, cz + 0.13, trunk, level, room);
+  box(b, cx - 0.62, baseY + 1.2, cz - 0.62, cx + 0.62, baseY + 2.9, cz + 0.62, leafLow, level, room);
+  box(b, cx - 0.4, baseY + 2.7, cz - 0.4, cx + 0.4, baseY + 4.0, cz + 0.4, leafHigh, level, room);
 }
 
 /** A lamppost: pole, arm and head, so it reads as a light and not a fence post. */
-function emitLamppost(b, x, z, level, baseY) {
+function emitLamppost(b, x, z, level, baseY, room) {
   const pole = objectColor(OBJ.LAMPPOST);
   const head = [0.95, 0.88, 0.6];
 
   const cx = x + 0.5;
   const cz = z + 0.5;
-  box(b, cx - 0.08, baseY, cz - 0.08, cx + 0.08, baseY + 4.2, cz + 0.08, pole, level);
-  box(b, cx - 0.08, baseY + 4.0, cz - 0.08, cx + 0.55, baseY + 4.16, cz + 0.08, pole, level);
-  box(b, cx + 0.32, baseY + 3.78, cz - 0.14, cx + 0.6, baseY + 4.0, cz + 0.14, head, level);
+  box(b, cx - 0.08, baseY, cz - 0.08, cx + 0.08, baseY + 4.2, cz + 0.08, pole, level, room);
+  box(b, cx - 0.08, baseY + 4.0, cz - 0.08, cx + 0.55, baseY + 4.16, cz + 0.08, pole, level, room);
+  box(b, cx + 0.32, baseY + 3.78, cz - 0.14, cx + 0.6, baseY + 4.0, cz + 0.14, head, level, room);
 }
 
 /** An axis-aligned box with no bottom face. Winding verified by unit test. */
-function box(b, x0, y0, z0, x1, y1, z1, rgb, level) {
+function box(b, x0, y0, z0, x1, y1, z1, rgb, level, room = 0) {
   const flat = [1, 1, 1, 1];
   const side = rgb.map((c) => c * 0.88);
   const dark = rgb.map((c) => c * 0.76);
   const top = rgb.map((c) => c * 1.06);
 
+  // Objects are never facing-culled — only walls are — so they all use
+  // FACING_NONE and vanish only when a whole storey is cut away.
   // top (+Y)
-  b.quad([x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0], top, flat, level);
+  b.quad([x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0], top, flat, level, FACING_NONE, room);
   // north (−Z)
-  b.quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], side, flat, level);
+  b.quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], side, flat, level, FACING_NONE, room);
   // south (+Z)
-  b.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], dark, flat, level);
+  b.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], dark, flat, level, FACING_NONE, room);
   // west (−X)
-  b.quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], dark, flat, level);
+  b.quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], dark, flat, level, FACING_NONE, room);
   // east (+X)
-  b.quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], side, flat, level);
+  b.quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], side, flat, level, FACING_NONE, room);
 }
 
 export { MeshBuilder, AO_MIN, box };

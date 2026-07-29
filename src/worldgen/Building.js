@@ -103,14 +103,23 @@ export function buildBuilding(grid, rng, opts) {
 
   // Roof: a floor laid on the storey above the top one. Modelling it as an
   // ordinary floor rather than a special case means the chunk mesher, the
-  // storey cutaway and eventually rooftop access all get it for free.
+  // cutaway and eventually rooftop access all get it for free.
+  //
+  // It gets its own room id so the cutaway can lift it with the rest of the
+  // building. Room 0 means "outdoors", and a roof tagged as outdoors would
+  // never lift — you would step inside and still be looking at the roof.
+  let roofRoom = 0;
   if (storeys < grid.levels) {
+    roofRoom = roomId++;
     for (let iz = z; iz < z + d; iz++) {
-      for (let ix = x; ix < x + w; ix++) grid.setFloor(ix, iz, storeys, FLOOR.ROOF);
+      for (let ix = x; ix < x + w; ix++) {
+        grid.setFloor(ix, iz, storeys, FLOOR.ROOF);
+        grid.setRoom(ix, iz, storeys, roofRoom);
+      }
     }
   }
 
-  return { rooms, nextRoomId: roomId, entrance, stairFoot, storeys };
+  return { rooms, nextRoomId: roomId, entrance, stairFoot, storeys, roofRoom };
 }
 
 /** Solid walls all the way around a rectangle. */

@@ -26,15 +26,18 @@ const SHOTS = [
   { name: '03-close', rotation: 0, zoom: 0 },
   { name: '04-wide', rotation: 3, zoom: 5 },
   { name: '05-upstairs', rotation: 0, zoom: 2, level: 1 },
-  // Teleports the avatar inside a building, which is what drives the storey
-  // cutaway. Capturing it exercises the real code path rather than poking
-  // `setLevelCutoff` directly.
+  // Teleports the avatar inside a building, which is what drives the per-room
+  // cutaway. Capturing it exercises the real code path rather than poking the
+  // cutaway state directly.
   { name: '06-indoors', rotation: 0, zoom: 1, indoors: true },
   // The player spawns beside their building, which at this camera angle puts
   // the building between them and the lens — that occlusion is M4's problem.
   // These two put the character in the open so the rig itself is inspectable.
   { name: '07-character-idle', rotation: 0, zoom: 0, onRoad: true },
   { name: '08-character-run', rotation: 0, zoom: 0, onRoad: true, running: true },
+  // Fog of war gets its own shot. Every other shot reveals the map first, so
+  // that geometry and cutaway regressions are not masked by darkness.
+  { name: '09-fog-of-war', rotation: 0, zoom: 3, fog: true },
 ];
 
 const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
@@ -87,6 +90,23 @@ try {
       const { isoCamera, avatar, town, world } = window.__knox;
       isoCamera.rotationStep = s.rotation;
       isoCamera.zoomStep = s.zoom;
+
+      // Fog is revealed by default so a geometry or cutaway regression is not
+      // hidden behind unexplored blackness.
+      if (s.fog) {
+        world.fog.enabled = true;
+        world.fog.reset();
+        // Look from somewhere else first, then come back. Without that step the
+        // shot only ever shows two of the three states — nothing has had the
+        // chance to become "remembered", which is the state the whole design
+        // exists for.
+        const t = { x: Math.floor(avatar.position.x), z: Math.floor(avatar.position.z) };
+        world.fog.update(t.x - 14, t.z - 14, 0);
+        world.fog.update(t.x, t.z, 0);
+      } else {
+        world.fog.enabled = false;
+        world.fog.revealAll();
+      }
       if (s.level !== undefined) {
         avatar.level = s.level;
         avatar.syncLevelHeight();

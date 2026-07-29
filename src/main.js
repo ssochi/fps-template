@@ -10,7 +10,6 @@ import { IsoCamera } from './render/IsoCamera.js';
 import { Loop } from './core/Loop.js';
 import { ACTION, Input } from './core/Input.js';
 import { World } from './world/World.js';
-import { FLAG } from './world/TileGrid.js';
 import { generateTown } from './worldgen/Town.js';
 import { Player } from './entity/Player.js';
 import { STOREY, tileToWorld } from './core/constants.js';
@@ -61,6 +60,7 @@ const basisR = new Vector3();
 const moveDir = new Vector3();
 const camFocus = new Vector3();
 const intent = { move: moveDir, run: false, sneak: false, interact: false };
+const observer = { x: 0, z: 0, level: 0 };
 let paused = false;
 
 window.addEventListener('resize', () => renderer.setSize(window.innerWidth, window.innerHeight));
@@ -104,12 +104,12 @@ const loop = new Loop({
       }
     }
 
-    // Storey cutaway. Outdoors you see the town with its roofs on; step inside
-    // and everything above your head is hidden so you can see the room you are
-    // standing in. M4 refines this to per-room rather than per-storey.
+    // Cutaway and fog of war both key off the tile the player is standing on.
     const t = avatar.tile();
-    const indoors = world.grid.hasFlag(t.x, t.z, avatar.level, FLAG.INDOOR);
-    world.setLevelCutoff(indoors ? avatar.level : Infinity);
+    observer.x = t.x;
+    observer.z = t.z;
+    observer.level = avatar.level;
+    world.updateView(dt, observer, isoCamera);
 
     // A small budget keeps a collapsing building off the critical path.
     world.flushDirty(2);
@@ -129,11 +129,12 @@ const loop = new Loop({
       const bars = Math.round(avatar.endurance * 20);
       statsEl.textContent =
         `${loop.fps.toFixed(0)} fps   sim ${loop.lastUpdateMs.toFixed(2)}ms   draw ${loop.lastRenderMs.toFixed(2)}ms\n` +
-        `${r.calls} draws   ${(r.triangles / 1000).toFixed(1)}k tris   ${world.stats.visible}/${world.stats.chunks} chunks\n` +
+        `${r.calls} draws   ${(r.triangles / 1000).toFixed(1)}k tris   ${world.stats.chunks} chunks\n` +
         `tile ${Math.floor(avatar.position.x)},${Math.floor(avatar.position.z)}  storey ${avatar.level}` +
         `   zoom ${isoCamera.viewHeight}m${paused ? '   [PAUSED]' : ''}\n` +
         `endurance [${'|'.repeat(bars)}${'.'.repeat(20 - bars)}]` +
-        `${avatar.winded ? ' WINDED' : ''}   ${avatar.gait}`;
+        `${avatar.winded ? ' WINDED' : ''}   ${avatar.gait}\n` +
+        `${world.stats.visible} tiles in sight   room ${world.grid.getRoom(observer.x, observer.z, observer.level)}`;
     }
   },
 });
